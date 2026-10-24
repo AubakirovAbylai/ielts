@@ -1,0 +1,53 @@
+spring:
+  application:
+    name: ielts-platform
+
+  # По умолчанию — H2 in-memory (разработка/демо). На проде:
+  # spring.datasource.url=jdbc:postgresql://localhost:5432/ielts
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:h2:file:./data/ielts;MODE=PostgreSQL;AUTO_SERVER=TRUE}
+    driver-class-name: ${SPRING_DATASOURCE_DRIVER_CLASS_NAME:org.h2.Driver}
+    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    # true (дефолт Spring Boot): сессия Hibernate живёт до конца запроса,
+    # контроллеры читают ленивые связи (student.getTeacher() и т.п.).
+    # Контроллеры при этом отдают плоские DTO, а не entity — без циклов и утечек.
+    open-in-view: true
+    properties:
+      hibernate.format_sql: false
+  h2:
+    console:
+      enabled: ${H2_CONSOLE_ENABLED:false}
+      path: /h2-console
+
+server:
+  port: ${PORT:8080}
+
+app:
+  bootstrap:
+    # Учитель создаётся при первом запуске пустой БД. На проде задать свои значения.
+    teacher-email: ${BOOTSTRAP_TEACHER_EMAIL:teacher@ielts.local}
+    teacher-password: ${BOOTSTRAP_TEACHER_PASSWORD:teacher123}
+    # Демо-ученик создаётся только если true. На проде: false.
+    demo-student: ${BOOTSTRAP_DEMO_STUDENT:true}
+  jwt:
+    # Секрет генерируется при первом запуске и пишется в ./data/jwt.secret,
+    # если не задан здесь. На проде задать переменной окружения APP_JWT_SECRET.
+    secret: ""
+    ttl-minutes: 720
+  ai:
+    # Поставщик ИИ: "gemini" | "mock" (без ключа — работает по заглушке).
+    provider: ${AI_PROVIDER:mock}
+    gemini:
+      api-key: ${GEMINI_API_KEY:}
+      model: ${AI_MODEL:gemini-flash-lite-latest}
+      base-url: https://generativelanguage.googleapis.com/v1beta
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:8080,http://localhost:3000}
+
+logging:
+  level:
+    kz.ielts.platform: INFO

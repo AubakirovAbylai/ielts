@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IELTS Platform</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="auth-screen">
+  <div class="auth-card">
+    <h1>🎓 IELTS Platform</h1>
+    <p class="muted">Progress Tracker · AI Writing · AI Speaking</p>
+    <div class="tabs">
+      <button class="tab active" data-tab="login">Вход</button>
+      <button class="tab" data-tab="register">Регистрация</button>
+    </div>
+    <form id="login-form" class="auth-form">
+      <input type="email" id="login-email" placeholder="Email" required>
+      <input type="password" id="login-password" placeholder="Пароль" required>
+      <button type="submit" class="btn primary">Войти</button>
+    </form>
+    <form id="register-form" class="auth-form hidden">
+      <input type="text" id="reg-name" placeholder="Имя и фамилия" required>
+      <input type="email" id="reg-email" placeholder="Email" required>
+      <input type="password" id="reg-password" placeholder="Пароль (мин. 6 символов)" required>
+      <button type="submit" class="btn primary">Создать аккаунт ученика</button>
+    </form>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <nav>
+    <span class="logo">🎓 IELTS</span>
+    <div id="nav-tabs">
+      <button class="nav-btn active" data-page="dashboard">📊 Дашборд</button>
+      <button class="nav-btn" data-page="tracker">📈 Трекер</button>
+      <button class="nav-btn" data-page="writing">✍ Writing</button>
+      <button class="nav-btn" data-page="speaking">🎤 Speaking</button>
+      <button class="nav-btn hidden" data-page="cabinet" id="nav-cabinet">🧑‍🏫 Кабинет</button>
+    </div>
+    <div>
+      <span id="nav-user" class="muted small"></span>
+      <button id="logout-btn" class="btn small">Выйти</button>
+    </div>
+  </nav>
+
+  <main>
+    <section id="page-dashboard" class="page"></section>
+    <section id="page-tracker" class="page hidden"></section>
+    <section id="page-writing" class="page hidden"></section>
+    <section id="page-speaking" class="page hidden"></section>
+    <section id="page-cabinet" class="page hidden"></section>
+  </main>
+</div>
+
+<div id="toast" class="hidden"></div>
+<script src="/app.js"></script>
+</body>
+</html>

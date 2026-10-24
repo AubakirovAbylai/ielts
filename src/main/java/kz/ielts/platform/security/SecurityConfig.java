@@ -33,6 +33,7 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/healthz").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/", "/index.html", "/app.js", "/style.css",
                                 "/favicon.ico", "/error").permitAll()

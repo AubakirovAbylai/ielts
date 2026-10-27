@@ -34,17 +34,21 @@ public class WritingController {
 
     // ---------- Банк заданий ----------
 
-    public record TaskRequest(String taskType, String moduleType, String promptKind, String prompt) {}
+    public record TaskRequest(String taskType, String moduleType, String promptKind,
+                              String prompt, String imageUrl) {}
 
     /** Плоский DTO задания: без entity User-владельца. */
     public record TaskDto(Long id, String taskType, String moduleType, String promptKind,
-                          String prompt, int minWords, int timeLimitMin, String createdAt) {}
+                          String prompt, String imageUrl, int minWords, int timeLimitMin,
+                          String createdAt) {}
 
     private static TaskDto toDto(WritingTask t) {
         return new TaskDto(t.getId(),
                 t.getTaskType() == null ? null : t.getTaskType().name(),
                 t.getModuleType() == null ? null : t.getModuleType().name(),
-                t.getPromptKind(), t.getPrompt(), t.getMinWords(), t.getTimeLimitMin(),
+                t.getPromptKind(), t.getPrompt(),
+                t.getImageUrl() == null ? "" : t.getImageUrl(),
+                t.getMinWords(), t.getTimeLimitMin(),
                 t.getCreatedAt() == null ? null : t.getCreatedAt().toString());
     }
 
@@ -71,17 +75,38 @@ public class WritingController {
     @PostMapping("/tasks")
     public TaskDto createTask(@RequestBody TaskRequest req, CurrentUser me) {
         requireTeacher(me);
+        WritingTask task = buildTask(req, null, me);
+        return toDto(tasks.save(task));
+    }
+
+    @PutMapping("/tasks/{id}")
+    public TaskDto updateTask(@PathVariable Long id, @RequestBody TaskRequest req, CurrentUser me) {
+        requireTeacher(me);
+        WritingTask task = tasks.findById(id).orElseThrow(this::notFound);
+        if (!task.getOwner().getId().equals(me.id())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        }
+        return toDto(tasks.save(buildTask(req, task, me)));
+    }
+
+    private WritingTask buildTask(TaskRequest req, WritingTask task, CurrentUser me) {
         if (req.prompt() == null || req.prompt().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "prompt обязателен");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "prompt is required");
         }
         WritingTask.TaskType type = WritingTask.TaskType.valueOf(
                 req.taskType() == null ? "TASK_2" : req.taskType().toUpperCase());
         WritingTask.ModuleType module = WritingTask.ModuleType.valueOf(
                 req.moduleType() == null ? "ACADEMIC" : req.moduleType().toUpperCase());
-        User owner = users.findById(me.id()).orElseThrow(this::notFound);
-        WritingTask task = new WritingTask(owner, type, module, req.prompt().trim());
+        if (task == null) {
+            User owner = users.findById(me.id()).orElseThrow(this::notFound);
+            task = new WritingTask(owner, type, module, req.prompt().trim());
+        }
+        task.setTaskType(type);
+        task.setModuleType(module);
+        task.setPrompt(req.prompt().trim());
         task.setPromptKind(req.promptKind());
-        return toDto(tasks.save(task));
+        task.setImageUrl(req.imageUrl() == null || req.imageUrl().isBlank() ? null : req.imageUrl().trim());
+        return task;
     }
 
     @DeleteMapping("/tasks/{id}")
@@ -110,7 +135,7 @@ public class WritingController {
     public CriteriaDto createCriteria(@RequestBody CriteriaRequest req, CurrentUser me) {
         requireTeacher(me);
         if (req.content() == null || req.content().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content обязателен");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content is required");
         }
         User owner = users.findById(me.id()).orElseThrow(this::notFound);
         int nextVersion = criteria.findByOwnerIdOrderByCreatedAtDesc(me.id()).stream()
@@ -123,7 +148,7 @@ public class WritingController {
 
         CriteriaSet set = new CriteriaSet(owner,
                 req.title() == null || req.title().isBlank()
-                        ? "Критерии v" + nextVersion : req.title(),
+                        ? "Criteria v" + nextVersion : req.title(),
                 req.content().trim());
         set.setVersion(nextVersion);
         return toDto(criteria.save(set));
@@ -141,13 +166,30 @@ public class WritingController {
                 .forEach(c -> { c.setActive(c.getId().equals(id)); criteria.save(c); });
     }
 
+    @GetMapping("/active-criteria")
+    public CriteriaDto getActiveCriteria(CurrentUser me) {
+        Long teacherId;
+        if (me.isTeacher()) {
+            teacherId = me.id();
+        } else {
+            User user = users.findById(me.id()).orElseThrow(this::notFound);
+            if (user.getTeacher() == null) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No active criteria set found");
+            }
+            teacherId = user.getTeacher().getId();
+        }
+        CriteriaSet set = criteria.findFirstByOwnerIdAndActiveTrueOrderByVersionDesc(teacherId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No active criteria set found"));
+        return toDto(set);
+    }
+
     private void requireTeacher(CurrentUser me) {
         if (!me.isTeacher()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Только для преподавателя");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Teachers only");
         }
     }
 
     private ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Не найдено");
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
     }
 }

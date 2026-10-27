@@ -30,19 +30,29 @@ public class SpeakingTopic {
     @Column(length = 1000)
     private String description;
 
+    /** Part 1 questions: short answers on familiar topics (4-6 questions). */
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "speaking_question",
             joinColumns = @JoinColumn(name = "topic_id", nullable = false),
             indexes = @Index(name = "ix_speaking_question_topic", columnList = "topic_id"))
     @Column(name = "text", nullable = false, length = 1000)
-    private List<String> questions = new ArrayList<>();
+    private List<String> part1Questions = new ArrayList<>();
 
-    /** Cue card для Part 2 (текст задания с пунктами "You should say..."). */
+    /** Cue card for Part 2 (task text with "You should say..." points). */
     @Column(length = 2000)
     private String cueCard;
 
+    /** Part 3 questions: discussion questions related to the Part 2 topic (2-6 questions). */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "speaking_question_p3",
+            joinColumns = @JoinColumn(name = "topic_id", nullable = false),
+            indexes = @Index(name = "ix_speaking_question_p3_topic", columnList = "topic_id"))
+    @Column(name = "text", nullable = false, length = 1000)
+    private List<String> part3Questions = new ArrayList<>();
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
+
 
     public SpeakingTopic() {}
 
@@ -57,11 +67,20 @@ public class SpeakingTopic {
     public void setTitle(String title) { this.title = title; }
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
-    public List<String> getQuestions() { return questions; }
-    public void setQuestions(List<String> questions) {
-        this.questions = questions == null ? new ArrayList<>() : new ArrayList<>(questions);
+    public List<String> getPart1Questions() { return part1Questions; }
+    public void setPart1Questions(List<String> questions) {
+        this.part1Questions = questions == null ? new ArrayList<>() : new ArrayList<>(questions);
+    }
+    public List<String> getPart3Questions() { return part3Questions; }
+    public void setPart3Questions(List<String> questions) {
+        this.part3Questions = questions == null ? new ArrayList<>() : new ArrayList<>(questions);
     }
     public String getCueCard() { return cueCard; }
     public void setCueCard(String cueCard) { this.cueCard = cueCard; }
     public Instant getCreatedAt() { return createdAt; }
+    /** Есть ли материал хотя бы в одной части. */
+    public boolean isEmpty() {
+        return part1Questions.isEmpty() && part3Questions.isEmpty()
+                && (cueCard == null || cueCard.isBlank());
+    }
 }

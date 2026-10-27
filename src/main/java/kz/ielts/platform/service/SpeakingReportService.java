@@ -32,45 +32,48 @@ public class SpeakingReportService {
         double lr = score(json, "lexical");
         double gra = score(json, "grammar");
         double pron = score(json, "pronunciation");
-        String report = json.path("report").asText("Отчёт пуст");
+        String report = json.path("report").asText("Empty report");
 
         session.applyReport(report, fc, lr, gra, pron);
     }
 
     private String systemPrompt() {
         return """
-                Ты — экзаменатор IELTS Speaking. Тебе даны вопросы и дословные транскрипции
-                ответов ученика. Оцени по четырём официальным критериям:
+                You are an IELTS Speaking examiner. You are given the questions and verbatim
+                transcripts of the student's answers. Assess them against the four official
+                criteria:
 
-                1. Fluency and Coherence — беглость, связность, длина и развитие ответов.
-                2. Lexical Resource — точность и разнообразие лексики, парафраз.
-                3. Grammatical Range and Accuracy — времена, структуры, характер ошибок.
-                4. Pronunciation — по транскрипции можно оценить лишь косвенно: длина фраз,
-                   связки, сигналы самокоррекции; укажи это ограничение в отчёте.
+                1. Fluency and Coherence — fluency, coherence, length and development of answers.
+                2. Lexical Resource — accuracy and range of vocabulary, paraphrasing.
+                3. Grammatical Range and Accuracy — tenses, structures, nature of errors.
+                4. Pronunciation — from a transcript it can only be assessed indirectly:
+                   phrase length, linkers, self-correction signals; mention this limitation
+                   in the report.
 
-                Отвечай ТОЛЬКО валидным JSON:
+                Respond ONLY with valid JSON:
                 {
-                  "fluency": <балл 1.0-9.0 шаг 0.5>,
-                  "lexical": <балл>,
-                  "grammar": <балл>,
-                  "pronunciation": <балл>,
-                  "report": "<markdown-отчёт>"
+                  "fluency": <score 1.0-9.0 step 0.5>,
+                  "lexical": <score>,
+                  "grammar": <score>,
+                  "pronunciation": <score>,
+                  "report": "<markdown report>"
                 }
 
-                В отчёте (report): баллы с обоснованием, конкретные фразы ученика с разбором,
-                лексические/грамматические ошибки с исправлениями, сильные стороны
-                и три приоритетные рекомендации (рекомендации — на русском).
-                Не завышай баллы. Оценка предварительная.
+                In the report field: scores with justification, specific phrases from the
+                student with analysis, lexical/grammatical errors with corrections, strengths,
+                and three priority recommendations. Write the report in English.
+                Do not inflate scores. This is a preliminary estimate.
                 """;
     }
 
     private String userPrompt(SpeakingSession s) {
         StringBuilder sb = new StringBuilder();
-        sb.append("=== ТЕМА: %s (%s) ===\n".formatted(
+        sb.append("=== TOPIC: %s (%s) ===\n".formatted(
                 s.getTopic().getTitle(), s.getPart()));
         for (SpeakingAnswer a : s.getAnswers()) {
-            sb.append("\nВопрос: %s\n".formatted(a.getQuestion()));
-            sb.append("Ответ ученика (длительность %d сек): %s\n".formatted(
+            sb.append("\nPart %s — Question: %s\n".formatted(
+                    a.getPart() == null ? "-" : a.getPart(), a.getQuestion()));
+            sb.append("Student's answer (duration %d sec): %s\n".formatted(
                     a.getDurationSec(), a.getAnswer()));
         }
         return sb.toString();
@@ -84,21 +87,21 @@ public class SpeakingReportService {
             }
             JsonNode node = mapper.readTree(cleaned);
             if (!node.has("report") || !node.has("fluency")) {
-                throw new AiChecker.AiUnavailableException("ИИ вернул неполный JSON");
+                throw new AiChecker.AiUnavailableException("AI returned incomplete JSON");
             }
             return node;
         } catch (AiChecker.AiUnavailableException e) {
             throw e;
         } catch (Exception e) {
             throw new AiChecker.AiUnavailableException(
-                    "Не удалось разобрать ответ ИИ: " + e.getMessage(), e);
+                    "Could not parse the AI response: " + e.getMessage(), e);
         }
     }
 
     private double score(JsonNode json, String field) {
         double v = json.path(field).asDouble(Double.NaN);
         if (Double.isNaN(v) || v < 1.0 || v > 9.0) {
-            throw new AiChecker.AiUnavailableException("ИИ вернул некорректный балл " + field);
+            throw new AiChecker.AiUnavailableException("AI returned an invalid score for " + field);
         }
         return IeltsBandMath.round(v);
     }

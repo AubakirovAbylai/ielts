@@ -21,7 +21,10 @@ spring:
   h2:
     console:
       enabled: ${H2_CONSOLE_ENABLED:false}
-      path: /h2-console
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
 
 server:
   port: ${PORT:8080}
@@ -37,7 +40,8 @@ app:
     # Секрет генерируется при первом запуске и пишется в ./data/jwt.secret,
     # если не задан здесь. На проде задать переменной окружения APP_JWT_SECRET.
     secret: ""
-    ttl-minutes: 720
+    # 3 дня: длинная практика (speaking/writing) не должна ломаться посреди сессии.
+    ttl-minutes: 4320
   ai:
     # Поставщик ИИ: "gemini" | "mock" (без ключа — работает по заглушке).
     provider: ${AI_PROVIDER:mock}

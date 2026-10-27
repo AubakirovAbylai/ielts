@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,19 +12,19 @@
     <h1>🎓 IELTS Platform</h1>
     <p class="muted">Progress Tracker · AI Writing · AI Speaking</p>
     <div class="tabs">
-      <button class="tab active" data-tab="login">Вход</button>
-      <button class="tab" data-tab="register">Регистрация</button>
+      <button class="tab active" data-tab="login">Sign in</button>
+      <button class="tab" data-tab="register">Register</button>
     </div>
     <form id="login-form" class="auth-form">
       <input type="email" id="login-email" placeholder="Email" required>
-      <input type="password" id="login-password" placeholder="Пароль" required>
-      <button type="submit" class="btn primary">Войти</button>
+      <input type="password" id="login-password" placeholder="Password" required>
+      <button type="submit" class="btn primary">Sign in</button>
     </form>
     <form id="register-form" class="auth-form hidden">
-      <input type="text" id="reg-name" placeholder="Имя и фамилия" required>
+      <input type="text" id="reg-name" placeholder="First and last name" required>
       <input type="email" id="reg-email" placeholder="Email" required>
-      <input type="password" id="reg-password" placeholder="Пароль (мин. 6 символов)" required>
-      <button type="submit" class="btn primary">Создать аккаунт ученика</button>
+      <input type="password" id="reg-password" placeholder="Password (min. 6 characters)" required>
+      <button type="submit" class="btn primary">Create a student account</button>
     </form>
   </div>
 </div>
@@ -33,15 +33,15 @@
   <nav>
     <span class="logo">🎓 IELTS</span>
     <div id="nav-tabs">
-      <button class="nav-btn active" data-page="dashboard">📊 Дашборд</button>
-      <button class="nav-btn" data-page="tracker">📈 Трекер</button>
+      <button class="nav-btn active" data-page="dashboard">📊 Dashboard</button>
+      <button class="nav-btn" data-page="tracker">📈 MOCK Test</button>
       <button class="nav-btn" data-page="writing">✍ Writing</button>
       <button class="nav-btn" data-page="speaking">🎤 Speaking</button>
-      <button class="nav-btn hidden" data-page="cabinet" id="nav-cabinet">🧑‍🏫 Кабинет</button>
+      <button class="nav-btn hidden" data-page="cabinet" id="nav-cabinet">🧑‍🏫 Teacher Panel</button>
     </div>
     <div>
       <span id="nav-user" class="muted small"></span>
-      <button id="logout-btn" class="btn small">Выйти</button>
+      <button id="logout-btn" class="btn small">Log out</button>
     </div>
   </nav>
 

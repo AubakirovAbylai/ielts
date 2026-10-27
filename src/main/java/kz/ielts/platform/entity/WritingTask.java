@@ -47,6 +47,9 @@ public class WritingTask {
     /** Рекомендуемое время в минутах: 20 для Task 1, 40 для Task 2. */
     @Column(name = "time_limit_min", nullable = false)
     private int timeLimitMin = 40;
+    /** URL картинки задания (Task 1: график/таблица/карта). Отдаётся статикой из data/uploads. */
+    @Column(name = "image_url", length = 500)
+    private String imageUrl;
 
     @Column(nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
@@ -78,5 +81,7 @@ public class WritingTask {
     public void setPrompt(String prompt) { this.prompt = prompt; }
     public int getMinWords() { return minWords; }
     public int getTimeLimitMin() { return timeLimitMin; }
+    public String getImageUrl() { return imageUrl; }
+    public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
     public Instant getCreatedAt() { return createdAt; }
 }

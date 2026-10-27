@@ -54,10 +54,10 @@ public class TestResultController {
     @PostMapping
     public ResultDto add(@RequestBody ResultRequest req, CurrentUser me) {
         if (req.testDate() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "testDate обязательна");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "testDate is required");
         }
         if (req.testDate().isAfter(LocalDate.now())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "testDate в будущем");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "testDate cannot be in the future");
         }
         validateSkill("listening", req.listening());
         validateSkill("reading", req.reading());
@@ -68,13 +68,13 @@ public class TestResultController {
         User student;
         if (req.studentId() != null && me.isTeacher()) {
             student = users.findById(req.studentId())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Ученик не найден"));
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Student not found"));
             if (student.getTeacher() == null || !student.getTeacher().getId().equals(me.id())) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Это не ваш ученик");
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This is not your student");
             }
         } else {
             student = users.findById(me.id())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Пользователь не найден"));
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
         }
 
         TestResult r = new TestResult(student, req.testDate());
@@ -101,7 +101,7 @@ public class TestResultController {
                     .stream().map(TestResultController::toDto).toList();
         }
         if (studentId != null && !studentId.equals(me.id())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Ученик видит только свои результаты");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Students can only see their own results");
         }
         return results.findByStudentIdOrderByTestDateAscIdAsc(me.id())
                 .stream().map(TestResultController::toDto).toList();
@@ -113,7 +113,7 @@ public class TestResultController {
                                         CurrentUser me) {
         Long target = studentId != null && me.isTeacher() ? studentId : me.id();
         if (!me.isTeacher() && !target.equals(me.id())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Ученик видит только свой прогресс");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Students can only see their own progress");
         }
         List<TestResult> history = results.findByStudentIdOrderByTestDateAscIdAsc(target);
 
@@ -178,7 +178,7 @@ public class TestResultController {
     private void validateSkill(String name, Double v) {
         if (!IeltsBandMath.isValidSkillScore(v)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    name + ": допустимы значения 1.0–9.0 с шагом 0.5");
+                    name + ": allowed values are 1.0–9.0 in 0.5 steps");
         }
     }
 

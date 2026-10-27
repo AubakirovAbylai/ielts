@@ -38,7 +38,7 @@ public class EssayCheckService {
                 ? criteria.findById(criteriaSetId).orElseThrow(this::notFound)
                 : criteria.findFirstByOwnerIdAndActiveTrueOrderByVersionDesc(essay.getTask().getOwner().getId())
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                            "Нет активного набора критериев: преподаватель должен загрузить критерии"));
+                            "No active criteria set: the teacher must upload criteria first"));
 
         String response = ai.check(systemPrompt(set), userPrompt(essay));
         JsonNode json = parseJson(response);
@@ -47,7 +47,7 @@ public class EssayCheckService {
         double cc = score(json, "coherence");
         double lr = score(json, "lexical");
         double gra = score(json, "grammar");
-        String report = json.path("report").asText("Отчёт пуст");
+        String report = json.path("report").asText("Empty report");
 
         EssayCheck check = new EssayCheck(essay, set, tr, cc, lr, gra, report);
         return checks.save(check);
@@ -55,42 +55,48 @@ public class EssayCheckService {
 
     private String systemPrompt(CriteriaSet set) {
         return """
-                Ты — экзаменатор IELTS с 15-летним стажем. Ты проверяешь эссе строго по критериям
-                и методическим указаниям преподавателя, приведённым ниже.
+                You are an IELTS examiner with 15 years of experience. Assess the essay strictly
+                against the criteria and the teacher's instructions below.
 
-                === КРИТЕРИИ И МЕТОДИКА ПРЕПОДАВАТЕЛЯ ===
+                === TEACHER'S CRITERIA AND INSTRUCTIONS ===
                 %s
-                === КОНЕЦ КРИТЕРИЕВ ===
+                === END OF CRITERIA ===
 
-                Отвечай ТОЛЬКО валидным JSON без markdown-обёртки:
+                Respond ONLY with valid JSON, no markdown wrapper:
                 {
-                  "taskResponse": <балл 1.0-9.0 шаг 0.5>,
-                  "coherence": <балл>,
-                  "lexical": <балл>,
-                  "grammar": <балл>,
-                  "report": "<markdown-отчёт>"
+                  "taskResponse": <score 1.0-9.0 step 0.5>,
+                  "coherence": <score>,
+                  "lexical": <score>,
+                  "grammar": <score>,
+                  "report": "<markdown report>"
                 }
 
-                Отчёт (поле report) должен содержать на английском:
-                1. Предполагаемый Band Score и балл по каждому критерию.
-                2. Обоснование, почему эссе соответствует этому уровню.
-                3. Конкретные ошибки с цитатами из текста ученика и исправлениями.
-                4. Примеры улучшения неудачных предложений.
-                5. Сильные стороны работы.
-                6. Три приоритетные рекомендации для следующего эссе (на русском).
-                Не завышай баллы. Оценка предварительная, не официальный балл IELTS.
+                The report field must contain, in English:
+                1. The estimated Band Score and the score for each criterion.
+                2. Justification of why the essay matches this level.
+                3. Specific errors with quotes from the student's text and corrections.
+                4. Improved versions of weak sentences.
+                5. Strengths of the work.
+                6. Three priority recommendations for the next essay.
+                Do not inflate scores. This is a preliminary estimate, not an official IELTS score.
                 """.formatted(set.getContent());
     }
 
     private String userPrompt(Essay essay) {
         WritingTask task = essay.getTask();
+        String imageNote = task.getImageUrl() == null || task.getImageUrl().isBlank() ? "" : """
+
+                Note: the task includes a chart/table image (%s) which you cannot see.
+                Judge Task Response only by how well the text summarises, selects and compares
+                the data as described in the prompt; do not penalise the essay for details
+                of the image you cannot verify.""".formatted(task.getImageUrl());
         return """
-                === ЗАДАНИЕ (%s, %s, лимит слов: %d) ===
-                %s
-                === ЭССЕ УЧЕНИКА (%d слов) ===
+                === TASK (%s, %s, minimum words: %d) ===
+                %s%s
+                === STUDENT'S ESSAY (%d words) ===
                 %s
                 """.formatted(task.getTaskType(), task.getModuleType(),
-                task.getMinWords(), task.getPrompt(),
+                task.getMinWords(), task.getPrompt(), imageNote,
                 essay.getWordCount(), essay.getText());
     }
 
@@ -102,32 +108,32 @@ public class EssayCheckService {
             }
             JsonNode node = mapper.readTree(cleaned);
             if (!node.has("report") || !node.has("taskResponse")) {
-                throw new AiChecker.AiUnavailableException("ИИ вернул неполный JSON");
+                throw new AiChecker.AiUnavailableException("AI returned incomplete JSON");
             }
             return node;
         } catch (AiUnavailableException e) {
             throw e;
         } catch (Exception e) {
-            throw new AiUnavailableException("Не удалось разобрать ответ ИИ: " + e.getMessage(), e);
+            throw new AiUnavailableException("Could not parse the AI response: " + e.getMessage(), e);
         }
     }
 
     private double score(JsonNode json, String field) {
         double v = json.path(field).asDouble(Double.NaN);
         if (Double.isNaN(v) || v < 1.0 || v > 9.0) {
-            throw new AiChecker.AiUnavailableException("ИИ вернул некорректный балл " + field);
+            throw new AiChecker.AiUnavailableException("AI returned an invalid score for " + field);
         }
         return IeltsBandMath.round(v);
     }
 
     private ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Набор критериев не найден");
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Criteria set not found");
     }
 
     public EssayCheck findByEssay(Long essayId) {
         return checks.findByEssayId(essayId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Проверка для эссе не найдена"));
+                        "Check for this essay not found"));
     }
 
     public EssayCheck findByEssayOrNull(Long essayId) {

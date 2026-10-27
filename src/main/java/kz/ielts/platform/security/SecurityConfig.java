@@ -37,16 +37,21 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/", "/index.html", "/app.js", "/style.css",
                                 "/favicon.ico", "/error").permitAll()
-                        .requestMatchers("/h2-console/**").permitAll()
+                        .requestMatchers("/uploads/**").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("TEACHER")
                         .anyRequest().authenticated())
-                .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+                .exceptionHandling(e -> e.authenticationEntryPoint((req, res, ex) -> {
+                    // Expired / invalid JWT → 401 with body, not empty 403.
+                    res.setStatus(401);
+                    res.setContentType("application/json;charset=UTF-8");
+                    res.getWriter().write("{\"message\":\"Your session has expired. Please log in again.\"}");
+                }))
+                .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()));
         return http.build();
     }
 
-    /** Источник CORS строится инлайн (не как @Bean): иначе конфликт с MVC-интроспектором. */
+    /** CORS source built inline (not as @Bean): otherwise conflicts with MVC introspector. */
     private CorsConfigurationSource corsSource(List<String> origins) {
         CorsConfiguration cfg = new CorsConfiguration();
         cfg.setAllowedOrigins(origins);

@@ -75,9 +75,9 @@ public class SpeakingSession {
         this.part = part;
     }
 
-    /** Добавить пару вопрос/ответ в конец сессии. */
-    public void addAnswer(String question, String answer, Integer durationSec) {
-        SpeakingAnswer a = new SpeakingAnswer(question, answer, durationSec, answers.size());
+    /** Добавить пару вопрос/ответ в конец сессии (part — PART_1/PART_2/PART_3 или null). */
+    public void addAnswer(String part, String question, String answer, Integer durationSec) {
+        SpeakingAnswer a = new SpeakingAnswer(part, question, answer, durationSec, answers.size());
         a.setSession(this);
         this.answers.add(a);
     }

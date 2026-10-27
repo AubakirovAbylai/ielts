@@ -51,19 +51,52 @@ public class SpeakingSessionController {
         if (!me.isTeacher()) {
             User teacher = student.getTeacher();
             if (teacher == null || !topic.getOwner().getId().equals(teacher.getId())) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Тема недоступна");
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This topic is not available");
             }
         }
         SpeakingSession.Part part = SpeakingSession.Part.TOPIC_PRACTICE;
-        if (req.part() != null) {
-            part = SpeakingSession.Part.valueOf(req.part().toUpperCase());
+        if (req.part() != null && !req.part().isBlank()) {
+            try {
+                part = SpeakingSession.Part.valueOf(req.part().toUpperCase());
+            } catch (IllegalArgumentException e) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown part: " + req.part());
+            }
+        }
+        // Выбранная часть должна быть заполнена в теме.
+        switch (part) {
+            case PART_1 -> requireNonEmpty(topic.getPart1Questions(), part);
+            case PART_2 -> requireCueCard(topic);
+            case PART_3 -> requireNonEmpty(topic.getPart3Questions(), part);
+            case FULL_TEST -> {
+                requireNonEmpty(topic.getPart1Questions(), part);
+                requireCueCard(topic);
+                requireNonEmpty(topic.getPart3Questions(), part);
+            }
+            default -> { /* TOPIC_PRACTICE — проверим только, что тема не пустая */ }
+        }
+        if (part == SpeakingSession.Part.TOPIC_PRACTICE && topic.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This topic has no questions yet");
         }
         SpeakingSession session = sessions.save(new SpeakingSession(student, topic, part));
         return Map.of("id", session.getId(), "topic", topic.getTitle(), "part", part.name());
     }
 
+    private void requireNonEmpty(List<String> questions, SpeakingSession.Part part) {
+        if (questions == null || questions.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Part " + part.name() + " of this topic is empty");
+        }
+    }
+
+    private void requireCueCard(SpeakingTopic topic) {
+        if (topic.getCueCard() == null || topic.getCueCard().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Part 2 of this topic has no cue card");
+        }
+    }
+
     public record AnswerRequest(List<Answer> answers) {}
-    public record Answer(String question, String text, Integer durationSec) {}
+    public record Answer(String part, String question, String text, Integer durationSec) {}
 
     /** Завершить сессию: сохранить транскрипции и сгенерировать отчёт. */
     @PostMapping("/{id}/finish")
@@ -74,11 +107,11 @@ public class SpeakingSessionController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
         if (session.getStatus() != SpeakingSession.Status.DRAFT) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Сессия уже завершена");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This session is already finished");
         }
         if (req.answers() != null) {
             for (Answer a : req.answers()) {
-                session.addAnswer(a.question(), a.text(), a.durationSec());
+                session.addAnswer(a.part(), a.question(), a.text(), a.durationSec());
             }
         }
         session.markFinished();
@@ -100,6 +133,33 @@ public class SpeakingSessionController {
         } catch (AiChecker.AiUnavailableException e) {
             out.put("reportError", e.getMessage());
         }
+        return out;
+    }
+
+    /** Повторная генерация отчёта для завершённой сессии (например, если ИИ был недоступен). */
+    @PostMapping("/{id}/report")
+    public Map<String, Object> regenerateReport(@PathVariable Long id, CurrentUser me) {
+        SpeakingSession session = sessions.findById(id).orElseThrow(this::notFound);
+        if (!session.getStudent().getId().equals(me.id())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        }
+        if (session.getStatus() != SpeakingSession.Status.FINISHED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Finish the session first");
+        }
+        if (session.getReport() != null && !session.getReport().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Report already exists");
+        }
+        reportService.generateReport(session);
+        sessions.save(session);
+        Map<String, Object> out = new HashMap<>();
+        out.put("id", session.getId());
+        out.put("report", session.getReport());
+        out.put("scores", Map.of(
+                "fluency", session.getScoreFluency(),
+                "lexical", session.getScoreLexical(),
+                "grammar", session.getScoreGrammar(),
+                "pronunciation", session.getScorePronunciation(),
+                "overall", session.getScoreOverall()));
         return out;
     }
 
@@ -143,10 +203,14 @@ public class SpeakingSessionController {
         m.put("part", s.getPart().name());
         m.put("status", s.getStatus().name());
         m.put("createdAt", s.getCreatedAt().toString());
-        m.put("qa", s.getAnswers().stream().map(a -> Map.<String, Object>of(
-                "question", a.getQuestion(),
-                "answer", a.getAnswer(),
-                "durationSec", a.getDurationSec())).toList());
+        m.put("qa", s.getAnswers().stream().map(a -> {
+            Map<String, Object> qa = new HashMap<>();
+            qa.put("part", a.getPart() == null ? "" : a.getPart());
+            qa.put("question", a.getQuestion());
+            qa.put("answer", a.getAnswer());
+            qa.put("durationSec", a.getDurationSec());
+            return qa;
+        }).toList());
         m.put("report", s.getReport() == null ? "" : s.getReport());
         m.put("scores", Map.of(
                 "fluency", s.getScoreFluency() == null ? 0 : s.getScoreFluency(),
@@ -158,6 +222,6 @@ public class SpeakingSessionController {
     }
 
     private ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Не найдено");
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
     }
 }

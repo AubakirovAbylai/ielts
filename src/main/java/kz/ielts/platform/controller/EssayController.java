@@ -46,14 +46,14 @@ public class EssayController {
     @PostMapping
     public Map<String, Object> submit(@RequestBody SubmitRequest req, CurrentUser me) {
         if (req.taskId() == null || req.text() == null || req.text().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "taskId и text обязательны");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "taskId and text are required");
         }
         User student = users.findById(me.id()).orElseThrow(this::notFound);
         WritingTask task = tasks.findById(req.taskId()).orElseThrow(this::notFound);
         if (!me.isTeacher()) {
             User owner = student.getTeacher() != null ? student.getTeacher() : null;
             if (owner == null || !task.getOwner().getId().equals(owner.getId())) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Задание недоступно");
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This task is not available");
             }
         }
 
@@ -102,6 +102,8 @@ public class EssayController {
         if (c != null) {
             out.putAll(toDto(c));
         }
+        out.put("prompt", essay.getTask().getPrompt());
+        out.put("imageUrl", essay.getTask().getImageUrl());
         essays.findFirstByStudentIdAndTaskIdOrderByAttemptDesc(essay.getStudent().getId(),
                         essay.getTask().getId())
                 .ifPresent(latest -> out.put("isLatestAttempt", latest.getId().equals(id)));
@@ -116,7 +118,7 @@ public class EssayController {
     public Map<String, Object> override(@PathVariable Long id,
                                         @RequestBody OverrideRequest req, CurrentUser me) {
         if (!me.isTeacher()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Только для преподавателя");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Teachers only");
         }
         EssayCheck check = checkService.findByEssay(id);
         if (!check.getEssay().getTask().getOwner().getId().equals(me.id())) {
@@ -173,6 +175,6 @@ public class EssayController {
     }
 
     private ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Не найдено");
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
     }
 }

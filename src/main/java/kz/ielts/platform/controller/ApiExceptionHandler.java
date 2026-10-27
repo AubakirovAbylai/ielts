@@ -18,7 +18,7 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<Map<String, Object>> handleStatus(ResponseStatusException e) {
         String msg = e.getReason() != null ? e.getReason()
-                : "Ошибка " + e.getStatusCode().value();
+                : "Error " + e.getStatusCode().value();
         return ResponseEntity.status(e.getStatusCode())
                 .body(Map.of("message", msg));
     }
@@ -26,12 +26,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, Object>> handleBadArg(IllegalArgumentException e) {
         return ResponseEntity.badRequest().body(Map.of("message",
-                e.getMessage() == null ? "Некорректный запрос" : e.getMessage()));
+                e.getMessage() == null ? "Invalid request" : e.getMessage()));
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleAll(Exception e) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("message", "Внутренняя ошибка сервера"));
+                .body(Map.of("message", "Internal server error"));
     }
 }

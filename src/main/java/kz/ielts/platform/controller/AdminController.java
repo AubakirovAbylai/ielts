@@ -41,10 +41,10 @@ public class AdminController {
                 || req.password() == null || req.password().length() < 6
                 || req.fullName() == null || req.fullName().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "email, fullName и пароль (мин. 6 символов) обязательны");
+                    "email, fullName and password (min. 6 characters) are required");
         }
         if (users.existsByEmail(req.email())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email уже занят");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This email is already taken");
         }
         User teacher = users.findById(me.id()).orElseThrow(this::notFound);
         User student = new User(req.email(), encoder.encode(req.password()),
@@ -82,7 +82,7 @@ public class AdminController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
         if (student.getRole() != User.Role.STUDENT) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Это не ученик");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This user is not a student");
         }
         users.delete(student);
     }
@@ -93,7 +93,7 @@ public class AdminController {
     public Map<String, Object> createGroup(@RequestBody Map<String, String> req, CurrentUser me) {
         String name = req.get("name");
         if (name == null || name.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "name обязателен");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "name is required");
         }
         User teacher = users.findById(me.id()).orElseThrow(this::notFound);
         StudentGroup group = groups.save(new StudentGroup(name.trim(), teacher));
@@ -120,7 +120,7 @@ public class AdminController {
         }
         User student = users.findById(studentId).orElseThrow(this::notFound);
         if (student.getTeacher() == null || !student.getTeacher().getId().equals(me.id())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Это не ваш ученик");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This is not your student");
         }
         student.getGroups().add(group);
         users.save(student);
@@ -140,6 +140,6 @@ public class AdminController {
     }
 
     private ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Не найдено");
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
     }
 }

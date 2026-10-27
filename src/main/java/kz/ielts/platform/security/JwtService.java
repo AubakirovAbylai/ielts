@@ -40,7 +40,7 @@ public class JwtService {
             Files.writeString(file, generated);
             return generated;
         } catch (Exception e) {
-            throw new IllegalStateException("Не удалось создать JWT-секрет: " + e.getMessage(), e);
+            throw new IllegalStateException("Could not create the JWT secret: " + e.getMessage(), e);
         }
     }
 

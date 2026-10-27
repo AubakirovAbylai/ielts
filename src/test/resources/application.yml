@@ -1,0 +1,23 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+
+app:
+  bootstrap:
+    teacher-email: teacher@test.local
+    teacher-password: teacher123
+    demo-student: false
+  jwt:
+    secret: test-secret-key-with-at-least-32-characters-long
+    ttl-minutes: 60
+  ai:
+    provider: mock
+  cors:
+    allowed-origins: http://localhost:8080

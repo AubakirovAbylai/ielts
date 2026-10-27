@@ -29,12 +29,17 @@ public class SpeakingAnswer {
     @Column(name = "duration_sec")
     private Integer durationSec;
 
+    /** Часть экзамена: PART_1 / PART_2 / PART_3 (в full test — часть конкретного вопроса). */
+    @Column(length = 20)
+    private String part;
+
     @Column(name = "order_index", nullable = false)
     private int orderIndex;
 
     public SpeakingAnswer() {}
 
-    public SpeakingAnswer(String question, String answer, Integer durationSec, int orderIndex) {
+    public SpeakingAnswer(String part, String question, String answer, Integer durationSec, int orderIndex) {
+        this.part = part;
         this.question = question == null ? "" : question;
         this.answer = answer == null ? "" : answer;
         this.durationSec = durationSec == null ? 0 : durationSec;
@@ -47,5 +52,6 @@ public class SpeakingAnswer {
     public String getQuestion() { return question; }
     public String getAnswer() { return answer; }
     public Integer getDurationSec() { return durationSec; }
+    public String getPart() { return part; }
     public int getOrderIndex() { return orderIndex; }
 }

@@ -39,7 +39,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                         principal, null, List.of(new SimpleGrantedAuthority("ROLE_" + role)));
                 SecurityContextHolder.getContext().setAuthentication(auth);
             } catch (JwtException | NumberFormatException ignored) {
-                // невалидный токен = аноним; защищённые маршруты вернут 401
+                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                response.setContentType("application/json;charset=UTF-8");
+                response.getWriter().write("{\"message\":\"Your session has expired. Please log in again.\"}");
+                return;
             }
         }
         chain.doFilter(request, response);

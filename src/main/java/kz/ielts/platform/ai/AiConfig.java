@@ -17,8 +17,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Провайдеры ИИ. Выбор: app.ai.provider = gemini | mock.
- * mock — детерминированная заглушка для локальной работы без ключа.
+ * AI providers. Choice: app.ai.provider = gemini | mock.
+ * mock — deterministic stub for local work without a key.
  */
 @Configuration
 public class AiConfig {
@@ -40,7 +40,7 @@ public class AiConfig {
         return new MockChecker();
     }
 
-    /** Gemini API (free tier): generateContent c JSON-режимом ответа. */
+    /** Gemini API (free tier): generateContent with JSON response mode. */
     static class GeminiChecker implements AiChecker {
         private final RestTemplate http;
         private final String url;
@@ -67,30 +67,30 @@ public class AiConfig {
 
                 HttpHeaders headers = new HttpHeaders();
                 headers.setContentType(MediaType.APPLICATION_JSON);
-                headers.set("x-goog-api-key", apiKey); // ключ в заголовке, не в URL — не утекает в логи/ошибки
+                headers.set("x-goog-api-key", apiKey); // key in header, not in URL — avoids leaking in logs/errors
                 String response = http.postForObject(url, new HttpEntity<>(body.toString(), headers), String.class);
                 JsonNode root = mapper.readTree(response);
                 JsonNode parts = root.path("candidates").path(0).path("content").path("parts");
                 if (!parts.isArray() || parts.isEmpty()) {
-                    throw new AiUnavailableException("Пустой ответ Gemini: "
+                    throw new AiUnavailableException("Empty Gemini response: "
                             + root.path("promptFeedback").toString());
                 }
                 StringBuilder sb = new StringBuilder();
                 for (JsonNode p : parts) sb.append(p.path("text").asText());
                 return sb.toString();
             } catch (RestClientException e) {
-                throw new AiUnavailableException("Gemini API недоступен: " + e.getMessage(), e);
+                throw new AiUnavailableException("Gemini API unavailable: " + e.getMessage(), e);
             } catch (AiUnavailableException e) {
                 throw e;
             } catch (Exception e) {
-                throw new AiUnavailableException("Ошибка разбора ответа Gemini: " + e.getMessage(), e);
+                throw new AiUnavailableException("Could not parse the Gemini response: " + e.getMessage(), e);
             }
         }
     }
 
     /**
-     * Заглушка: возвращает фиксированный отчёт, чтобы всё работало без ключа.
-     * Writing и Speaking ожидают разные схемы ответа — различаем по промпту.
+     * Stub: returns a fixed report so everything works without a key.
+     * Writing and Speaking expect different response schemas — distinguish by prompt.
      */
     static class MockChecker implements AiChecker {
         @Override
@@ -104,7 +104,7 @@ public class AiConfig {
                           "lexical": 6.0,
                           "grammar": 5.5,
                           "pronunciation": 6.0,
-                          "report": "## Предварительная оценка Speaking (МОК-режим, ключ Gemini не задан)\\n\\nОтветы записаны и сохранены. Для реальной оценки задайте GEMINI_API_KEY и AI_PROVIDER=gemini.\\n\\n**Сильные стороны:** ответы развернутые.\\n\\n**Рекомендации:** задайте ключ ИИ для настоящей проверки."
+                          "report": "## Speaking preliminary assessment (mock mode, no Gemini key)\\n\\nYour answers have been recorded and saved. For real assessment set GEMINI_API_KEY and AI_PROVIDER=gemini.\\n\\n**Strengths:** answers are developed.\\n\\n**Recommendations:** set the AI key for real checking."
                         }
                         """;
             }
@@ -114,7 +114,7 @@ public class AiConfig {
                       "coherence": 6.5,
                       "lexical": 6.0,
                       "grammar": 5.5,
-                      "report": "## Предварительная проверка (МОК-режим, ключ Gemini не задан)\\n\\nЭссе получено и сохранено. Для реальной ИИ-проверки задайте переменную окружения GEMINI_API_KEY и AI_PROVIDER=gemini.\\n\\n**Сильные стороны:** текст структурирован.\\n\\n**Рекомендации:** задайте ключ ИИ для настоящей проверки."
+                      "report": "## Preliminary check (mock mode, no Gemini key)\\n\\nThe essay has been received and saved. For real AI checking set the environment variable GEMINI_API_KEY and AI_PROVIDER=gemini.\\n\\n**Strengths:** the text is well structured.\\n\\n**Recommendations:** set the AI key for real checking."
                     }
                     """;
         }

@@ -41,7 +41,7 @@ public class ProfileController {
             if (req.targetBand() < 1.0 || req.targetBand() > 9.0
                     || (req.targetBand() * 2) != Math.floor(req.targetBand() * 2)) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "targetBand: 1.0–9.0 с шагом 0.5");
+                        "targetBand: 1.0–9.0 in 0.5 steps");
             }
             u.setTargetBand(req.targetBand());
         }

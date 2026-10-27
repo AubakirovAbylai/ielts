@@ -33,10 +33,10 @@ public class AuthController {
                 || req.password() == null || req.password().length() < 6
                 || req.fullName() == null || req.fullName().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "email, fullName и пароль (мин. 6 символов) обязательны");
+                    "email, fullName and password (min. 6 characters) are required");
         }
         if (users.existsByEmail(req.email())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email уже зарегистрирован");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This email is already registered");
         }
         // Открытая регистрация — только ученики. Учитель создаётся через /api/admin/teachers
         // или первого пользователя (см. DataSeeder).
@@ -54,9 +54,9 @@ public class AuthController {
     public Map<String, Object> login(@RequestBody LoginRequest req) {
         User user = users.findByEmail(req.email() == null ? "" : req.email())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                        "Неверный email или пароль"));
+                        "Invalid email or password"));
         if (!encoder.matches(req.password() == null ? "" : req.password(), user.getPasswordHash())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Неверный email или пароль");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid email or password");
         }
         return Map.of("token", jwt.issue(user.getId(), user.getEmail(), user.getRole().name()),
                 "role", user.getRole().name(),

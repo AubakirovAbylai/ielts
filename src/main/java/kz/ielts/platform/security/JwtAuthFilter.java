@@ -39,10 +39,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                         principal, null, List.of(new SimpleGrantedAuthority("ROLE_" + role)));
                 SecurityContextHolder.getContext().setAuthentication(auth);
             } catch (JwtException | NumberFormatException ignored) {
-                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                response.setContentType("application/json;charset=UTF-8");
-                response.getWriter().write("{\"message\":\"Your session has expired. Please log in again.\"}");
-                return;
+                // Stale/invalid token: treat the request as anonymous and let the
+                // security chain decide. Public endpoints (login/register) must still work;
+                // protected endpoints get 401 from the authentication entry point.
+                SecurityContextHolder.clearContext();
             }
         }
         chain.doFilter(request, response);

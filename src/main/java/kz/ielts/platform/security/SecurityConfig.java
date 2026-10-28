@@ -41,8 +41,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("TEACHER")
                         .anyRequest().authenticated())
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .exceptionHandling(e -> e.authenticationEntryPoint((req, res, ex) -> {
-                    // Expired / invalid JWT → 401 with body, not empty 403.
                     res.setStatus(401);
                     res.setContentType("application/json;charset=UTF-8");
                     res.getWriter().write("{\"message\":\"Your session has expired. Please log in again.\"}");
@@ -51,7 +51,6 @@ public class SecurityConfig {
         return http.build();
     }
 
-    /** CORS source built inline (not as @Bean): otherwise conflicts with MVC introspector. */
     private CorsConfigurationSource corsSource(List<String> origins) {
         CorsConfiguration cfg = new CorsConfiguration();
         cfg.setAllowedOrigins(origins);

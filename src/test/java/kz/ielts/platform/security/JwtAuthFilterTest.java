@@ -67,24 +67,19 @@ class JwtAuthFilterTest {
     }
 
     @Test
-    void invalidToken_returns401AndDoesNotCallChain() throws Exception {
+    void invalidToken_treatedAsAnonymousAndChainContinues() throws Exception {
+        // Invalid/stale token must NOT 401 in the filter: the request proceeds
+        // anonymously so public endpoints (login/register) stay reachable and
+        // protected endpoints get 401 from the security entry point.
         String token = "invalid.jwt.token";
         when(request.getHeader("Authorization")).thenReturn("Bearer " + token);
         when(jwtService.parse(token)).thenThrow(new JwtException("bad token"));
 
-        StringWriter sw = new StringWriter();
-        PrintWriter pw = new PrintWriter(sw);
-        when(response.getWriter()).thenReturn(pw);
-
         filter.doFilterInternal(request, response, chain);
 
-        verify(response).setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-        verify(response).setContentType("application/json;charset=UTF-8");
-        verify(response).getWriter();
-        verify(chain, never()).doFilter(any(), any());
-
-        String body = sw.toString();
-        assertThat(body).contains("expired");
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verify(chain).doFilter(request, response);
+        verify(response, never()).setStatus(HttpServletResponse.SC_UNAUTHORIZED);
     }
 
     @Test

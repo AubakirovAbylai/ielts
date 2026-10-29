@@ -7,10 +7,15 @@ import kz.ielts.platform.repository.CriteriaSetRepository;
 import kz.ielts.platform.repository.UserRepository;
 import kz.ielts.platform.repository.WritingTaskRepository;
 import kz.ielts.platform.security.JwtAuthFilter.CurrentUser;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
 import java.util.List;
 
 /**
@@ -135,23 +140,62 @@ public class WritingController {
     public CriteriaDto createCriteria(@RequestBody CriteriaRequest req, CurrentUser me) {
         requireTeacher(me);
         if (req.content() == null || req.content().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "content is required");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Criteria content is empty");
         }
         User owner = users.findById(me.id()).orElseThrow(this::notFound);
-        int nextVersion = criteria.findByOwnerIdOrderByCreatedAtDesc(me.id()).stream()
-                .filter(c -> c.getTitle().equals(req.title()))
+        return toDto(saveNewVersion(owner, req.title(), req.content().trim()));
+    }
+
+    /**
+     * Загрузка критериев из PDF (официальные band-дескрипторы и т.п.):
+     * извлекает текст и сохраняет как новый (или новую версию) набор критериев.
+     * multipart: file (PDF), title (optional — по умолчанию имя файла).
+     */
+    @PostMapping("/criteria/upload")
+    public CriteriaDto uploadCriteriaPdf(@RequestParam("file") MultipartFile file,
+                                         @RequestParam(value = "title", required = false) String title,
+                                         CurrentUser me) {
+        requireTeacher(me);
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "PDF file is required");
+        }
+        String text;
+        try (PDDocument doc = Loader.loadPDF(file.getBytes())) {
+            text = new PDFTextStripper().getText(doc);
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Не удалось прочитать PDF: " + e.getMessage());
+        }
+        if (text == null || text.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Не удалось извлечь текст из PDF (возможно, это скан без текстового слоя)");
+        }
+        String effectiveTitle = (title == null || title.isBlank())
+                ? stripExtension(file.getOriginalFilename()) : title.trim();
+        User owner = users.findById(me.id()).orElseThrow(this::notFound);
+        return toDto(saveNewVersion(owner, effectiveTitle, text.trim()));
+    }
+
+    private CriteriaSet saveNewVersion(User owner, String title, String content) {
+        List<CriteriaSet> all = criteria.findByOwnerIdOrderByCreatedAtDesc(owner.getId());
+        String effectiveTitle = (title == null || title.isBlank()) ? "Criteria" : title.trim();
+        int nextVersion = all.stream()
+                .filter(c -> c.getTitle().equals(effectiveTitle))
                 .mapToInt(CriteriaSet::getVersion).max().orElse(0) + 1;
         // прежние версии деактивируются
-        criteria.findByOwnerIdOrderByCreatedAtDesc(me.id()).stream()
-                .filter(c -> c.getTitle().equals(req.title()))
+        all.stream()
+                .filter(c -> c.getTitle().equals(effectiveTitle))
                 .forEach(c -> { c.setActive(false); criteria.save(c); });
 
-        CriteriaSet set = new CriteriaSet(owner,
-                req.title() == null || req.title().isBlank()
-                        ? "Criteria v" + nextVersion : req.title(),
-                req.content().trim());
+        CriteriaSet set = new CriteriaSet(owner, effectiveTitle, content);
         set.setVersion(nextVersion);
-        return toDto(criteria.save(set));
+        return criteria.save(set);
+    }
+
+    private static String stripExtension(String name) {
+        if (name == null || name.isBlank()) return "Criteria from PDF";
+        int dot = name.lastIndexOf('.');
+        return dot > 0 ? name.substring(0, dot) : name;
     }
 
     @PutMapping("/criteria/{id}/activate")

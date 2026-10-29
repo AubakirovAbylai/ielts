@@ -916,7 +916,12 @@ function renderCabinet() {
       <p class="muted small">Active set is used in the AI prompt. Upload with the same title = new version.</p>
       <input id="cab-cr-title" placeholder="Title (e.g. "IELTS Writing — Official Descriptor")" style="width:100%;margin-bottom:8px">
       <textarea id="cab-cr-content" rows="5" style="width:100%;margin-bottom:8px" placeholder="Criteria and instructions for the AI..."></textarea>
-      <button class="btn primary" id="cab-cr-add">Upload / update</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn primary" id="cab-cr-add">Upload / update</button>
+        <span class="muted small">or</span>
+        <input type="file" id="cab-cr-pdf" accept="application/pdf,.pdf" style="max-width:260px">
+        <button class="btn small" id="cab-cr-pdf-upload">Import PDF</button>
+      </div>
       <table style="margin-top:12px"><thead><tr><th>Title</th><th>Version</th><th>Active</th><th></th></tr></thead><tbody>
       ${state.criteria.map((c) => `
         <tr><td>${esc(c.title)}</td><td>v${c.version}</td>
@@ -1015,6 +1020,27 @@ function renderCabinet() {
         title: $("#cab-cr-title").value, content: $("#cab-cr-content").value,
       });
       toast("Criteria saved");
+      state.criteria = await GET("/api/writing/criteria");
+      renderCabinet();
+    } catch (e) { toast(e.message, true); }
+  };
+  $("#cab-cr-pdf-upload").onclick = async () => {
+    const fileInput = $("#cab-cr-pdf");
+    if (!fileInput.files || !fileInput.files[0]) { toast("Choose a PDF file first", true); return; }
+    const fd = new FormData();
+    fd.append("file", fileInput.files[0]);
+    const t = $("#cab-cr-title").value.trim();
+    if (t) fd.append("title", t);
+    try {
+      const res = await fetch("/api/writing/criteria/upload", {
+        method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd,
+      });
+      if (!res.ok) {
+        let msg = "PDF import failed (" + res.status + ")";
+        try { msg = (await res.json()).message || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      toast("PDF imported as criteria");
       state.criteria = await GET("/api/writing/criteria");
       renderCabinet();
     } catch (e) { toast(e.message, true); }

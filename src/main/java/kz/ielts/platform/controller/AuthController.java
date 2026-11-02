@@ -87,25 +87,4 @@ public class AuthController {
                 "targetBand", user.getTargetBand() == null ? 0 : user.getTargetBand());
     }
 
-    // ===== ВРЕМЕННЫЙ ДИАГНОСТИЧЕСКИЙ ЭНДПОИНТ — УДАЛИТЬ ПОСЛЕ ОТЛАДКИ =====
-    @GetMapping("/debug-check")
-    public Map<String, Object> debugCheck(@RequestParam(defaultValue = "") String email,
-                                          @RequestParam(defaultValue = "") String password) {
-        var opt = users.findByEmail(email);
-        if (opt.isEmpty()) {
-            long totalUsers = users.count();
-            return Map.of("error", "user not found", "totalUsersInDb", totalUsers);
-        }
-        User u = opt.get();
-        boolean matches = !password.isEmpty() && encoder.matches(password, u.getPasswordHash());
-        return Map.of(
-                "email", u.getEmail(),
-                "role", u.getRole().name(),
-                "hashLength", u.getPasswordHash().length(),
-                "hashPrefix", u.getPasswordHash().substring(0, Math.min(15, u.getPasswordHash().length())),
-                "encoderClass", encoder.getClass().getName(),
-                "matches", matches,
-                "totalUsersInDb", users.count()
-        );
-    }
 }

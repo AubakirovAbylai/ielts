@@ -164,11 +164,11 @@ public class WritingController {
             text = new PDFTextStripper().getText(doc);
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Не удалось прочитать PDF: " + e.getMessage());
+                    "Could not read the PDF: " + e.getMessage());
         }
         if (text == null || text.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Не удалось извлечь текст из PDF (возможно, это скан без текстового слоя)");
+                    "Could not extract text from the PDF (it may be a scan without a text layer)");
         }
         String effectiveTitle = (title == null || title.isBlank())
                 ? stripExtension(file.getOriginalFilename()) : title.trim();

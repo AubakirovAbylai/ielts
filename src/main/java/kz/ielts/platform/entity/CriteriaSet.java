@@ -36,6 +36,17 @@ public class CriteriaSet {
     @Column(nullable = false)
     private boolean active = true;
 
+    /** К какому заданию относится набор: TASK_1, TASK_2 или null — для обоих. */
+    @Column(name = "task_type", length = 16)
+    private String taskType;
+
+    /**
+     * Архив: набор «удалён» учителем, но на него ссылаются старые проверки эссе,
+     * поэтому физически строку не удаляем — просто скрываем из списка.
+     */
+    @Column(name = "archived")
+    private Boolean archived = false;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -57,5 +68,9 @@ public class CriteriaSet {
     public void setContent(String content) { this.content = content; }
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
+    public String getTaskType() { return taskType; }
+    public void setTaskType(String taskType) { this.taskType = taskType; }
+    public boolean isArchived() { return Boolean.TRUE.equals(archived); }
+    public void setArchived(boolean archived) { this.archived = archived; }
     public Instant getCreatedAt() { return createdAt; }
 }

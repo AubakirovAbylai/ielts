@@ -17,6 +17,8 @@ const state = {
   // Essay editor
   editor: { taskId: null, startedAt: null, typingStart: null, typingMs: 0, pasteCount: 0, examMode: false, timer: null },
   // Speaking session
+  // UI tabs / filters (remembered between re-renders)
+  ui: { writingTab: "TASK_2", writingTopic: "", cabTab: "students", bankTab: "TASK_2", bankTopic: "" },
   speaking: { sessionId: null, topic: null, qaIndex: 0, answers: [], recognition: null, timer: null, answerStart: null },
 };
 
@@ -106,6 +108,90 @@ function ieltsRound(band) {
 
 function fmtBand(v) { return v == null ? "—" : Number(v).toFixed(1); }
 
+// ---------- UI helpers: tabs, topics ----------
+const IELTS_TOPICS = ["Education", "Environment", "Technology", "Health", "Work & Business",
+  "Society & Family", "Crime & Law", "Government", "Media & Advertising", "Globalisation",
+  "Transport & Cities", "Culture & Art", "Sport & Leisure", "Science", "Travel & Tourism",
+  "Food", "Energy", "Housing", "Letter: formal", "Letter: semi-formal", "Letter: informal", "General"];
+
+const TASK_INFO = {
+  TASK_1: { label: "Writing Task 1", icon: "📊", hint: "Report (graph / table / map / process) or letter · min 150 words · 20 min · Task Achievement" },
+  TASK_2: { label: "Writing Task 2", icon: "📝", hint: "Essay (opinion / discussion / problem-solution) · min 250 words · 40 min · Task Response" },
+};
+
+/** Unique topics of tasks, sorted; "General" last. */
+function topicsOf(tasks) {
+  const set = [...new Set(tasks.map((t) => t.topic || "General"))];
+  return set.sort((a, b) => (a === "General") - (b === "General") || a.localeCompare(b));
+}
+
+/** Tab bar. items: [[key, label, count?]]. Buttons get data-<attr>="key". */
+function tabsBar(items, active, attr) {
+  return `<div class="subtabs">${items.map(([key, label, count]) => `
+    <button class="subtab ${key === active ? "active" : ""}" data-${attr}="${esc(key)}">${label}${
+      count != null ? ` <span class="count">${count}</span>` : ""}</button>`).join("")}</div>`;
+}
+
+/** Topic dropdown with "All topics" option. */
+function topicSelect(id, topics, current, counts) {
+  return `<select id="${id}" class="topic-select">
+    <option value="">All topics${counts ? ` (${Object.values(counts).reduce((a, b) => a + b, 0)})` : ""}</option>
+    ${topics.map((t) => `<option value="${esc(t)}" ${t === current ? "selected" : ""}>${esc(t)}${counts ? ` (${counts[t] || 0})` : ""}</option>`).join("")}
+  </select>`;
+}
+
+function countBy(list, fn) {
+  return list.reduce((m, x) => { const k = fn(x); m[k] = (m[k] || 0) + 1; return m; }, {});
+}
+
+function closeModal(id) {
+  document.getElementById(id)?.remove();
+  document.getElementById(id + "-overlay")?.remove();
+}
+
+function openModal(id, html) {
+  closeModal(id);
+  const overlay = document.createElement("div");
+  overlay.id = id + "-overlay";
+  overlay.className = "modal-overlay";
+  overlay.onclick = () => closeModal(id);
+  const modal = document.createElement("div");
+  modal.id = id;
+  modal.className = "card modal";
+  modal.innerHTML = html;
+  document.body.appendChild(overlay);
+  document.body.appendChild(modal);
+  return modal;
+}
+
+// ---------- Change password ----------
+function openPasswordModal() {
+  const m = openModal("pwd-modal", `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0">🔑 Change password</h2>
+      <button class="btn small" data-close>Close</button>
+    </div>
+    <form id="pwd-form" class="auth-form">
+      <input type="password" id="pwd-current" placeholder="Current password" autocomplete="current-password" required>
+      <input type="password" id="pwd-new" placeholder="New password (min. 6 characters)" autocomplete="new-password" required minlength="6">
+      <input type="password" id="pwd-new2" placeholder="Repeat new password" autocomplete="new-password" required minlength="6">
+      <button type="submit" class="btn primary">Save new password</button>
+    </form>`);
+  m.querySelector("[data-close]").onclick = () => closeModal("pwd-modal");
+  $("#pwd-current").focus();
+  $("#pwd-form").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const np = $("#pwd-new").value;
+    if (np.length < 6) return toast("New password must be at least 6 characters", true);
+    if (np !== $("#pwd-new2").value) return toast("Passwords do not match", true);
+    try {
+      await POST("/api/profile/password", { currentPassword: $("#pwd-current").value, newPassword: np });
+      closeModal("pwd-modal");
+      toast("Password changed");
+    } catch (e) { toast(e.message, true); }
+  };
+}
+
 // ---------- Auth ----------
 function logout() {
   localStorage.removeItem("token"); localStorage.removeItem("role"); localStorage.removeItem("fullName");
@@ -157,26 +243,72 @@ function renderPage(name) {
 }
 
 // ---------- Dashboard ----------
+function skillStats() {
+  const series = (state.progress && state.progress.series) || [];
+  const fromTests = (k) => {
+    const vals = series.map((s) => s[k]).filter((v) => v != null);
+    return { latest: vals.length ? vals[vals.length - 1] : null,
+             best: vals.length ? Math.max(...vals) : null, count: vals.length };
+  };
+  const fromEssays = (tt) => {
+    const all = state.essays.filter((e) => e.taskType === tt);
+    const checked = all.filter((e) => e.checked && e.overall != null)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return { latest: checked.length ? checked[checked.length - 1].overall : null,
+             best: checked.length ? Math.max(...checked.map((e) => e.overall)) : null,
+             count: all.length };
+  };
+  const sp = state.speakingSessions.filter((s) => s.status === "REPORTED" && s.overall)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return {
+    listening: fromTests("listening"),
+    reading: fromTests("reading"),
+    task1: fromEssays("TASK_1"),
+    task2: fromEssays("TASK_2"),
+    speaking: { latest: sp.length ? sp[sp.length - 1].overall : null,
+                best: sp.length ? Math.max(...sp.map((s) => s.overall)) : null,
+                count: state.speakingSessions.length },
+  };
+}
+
+function skillCard(key, icon, title, st, unit, action, goto, extra = "") {
+  return `<div class="card skill-card skill-${key}">
+    <div class="skill-head"><span class="skill-icon">${icon}</span><span class="skill-title">${title}</span></div>
+    <div class="skill-value">${fmtBand(st.latest)}</div>
+    <div class="muted small">latest · best ${fmtBand(st.best)} · ${st.count} ${unit}</div>
+    <button class="btn small" data-goto="${goto}" ${extra}>${action} →</button>
+  </div>`;
+}
+
 function renderDashboard() {
   const p = state.progress;
   const el = $("#page-dashboard");
+  const s = skillStats();
+  const isTeacher = state.role === "TEACHER";
+  const cards = `
+    <h2 style="margin-top:0">${isTeacher ? "Skills overview (your students)" : "My skills"}</h2>
+    <div class="grid cols-5 skill-grid">
+      ${skillCard("listening", "🎧", "Listening", s.listening, "tests", "Add result", "tracker")}
+      ${skillCard("reading", "📖", "Reading", s.reading, "tests", "Add result", "tracker")}
+      ${skillCard("task1", "📊", "Writing Task 1", s.task1, "essays", "Practice", "writing", 'data-wtab="TASK_1"')}
+      ${skillCard("task2", "📝", "Writing Task 2", s.task2, "essays", "Practice", "writing", 'data-wtab="TASK_2"')}
+      ${skillCard("speaking", "🎤", "Speaking", s.speaking, "sessions", "Practice", "speaking")}
+    </div>`;
+
+  let body;
   if (!p || p.count === 0) {
-    el.innerHTML = `<div class="card hero">
+    body = `<div class="card hero">
       <h2>Welcome! 👋</h2>
-      <p class="muted">Your IELTS preparation progress will appear here. Add your first test result to get started!</p>
+      <p class="muted">Your MOCK test progress will appear here. Add your first test result to get started!</p>
       <button class="btn" style="background:rgba(255,255,255,.92);margin-top:14px" data-goto="tracker">📈 Add first result</button>
     </div>`;
-    el.querySelector("[data-goto]").onclick = () => renderPage("tracker");
-    return;
-  }
-  const last = p.series[p.series.length - 1];
-  const prev = p.series.length > 1 ? p.series[p.series.length - 2] : null;
-  const delta = prev && prev.overall != null && last.overall != null
-    ? last.overall - prev.overall : null;
-  const target = p.targetBand;
-  const gap = target && last.overall != null ? (last.overall - target) : null;
-
-  el.innerHTML = `
+  } else {
+    const last = p.series[p.series.length - 1];
+    const prev = p.series.length > 1 ? p.series[p.series.length - 2] : null;
+    const delta = prev && prev.overall != null && last.overall != null ? last.overall - prev.overall : null;
+    const target = p.targetBand;
+    const gap = target && last.overall != null ? (last.overall - target) : null;
+    body = `
     <div class="grid cols-4">
       <div class="card stat"><div class="value">${fmtBand(last.overall)}</div><div class="label">Latest Overall</div>
         ${delta != null ? `<div class="delta ${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "▲" : "▼"} ${Math.abs(delta).toFixed(1)} from previous</div>` : ""}</div>
@@ -187,6 +319,12 @@ function renderDashboard() {
     </div>
     <div class="card"><h2>Overall Progress</h2>${overallChart(p.series, target)}</div>
     <div class="card"><h2>Latest Test (${esc(last.date)})</h2>${skillBars(last)}</div>`;
+  }
+  el.innerHTML = cards + body;
+  el.querySelectorAll("[data-goto]").forEach((b) => b.onclick = () => {
+    if (b.dataset.wtab) { state.ui.writingTab = b.dataset.wtab; state.ui.writingTopic = ""; }
+    renderPage(b.dataset.goto);
+  });
 }
 
 function overallChart(series, target) {
@@ -374,49 +512,69 @@ const numOrNull = (v) => (v === "" || v == null ? null : parseFloat(v));
 function renderWriting() {
   const el = $("#page-writing");
   const isTeacher = state.role === "TEACHER";
+  const ui = state.ui;
+  const tt = ui.writingTab;
+  const info = TASK_INFO[tt];
+  const ofType = state.writingTasks.filter((t) => t.taskType === tt);
+  const topics = topicsOf(ofType);
+  if (ui.writingTopic && !topics.includes(ui.writingTopic)) ui.writingTopic = "";
+  const shown = ofType.filter((t) => !ui.writingTopic || (t.topic || "General") === ui.writingTopic);
+  const groups = topicsOf(shown).map((tp) => [tp, shown.filter((t) => (t.topic || "General") === tp)]);
+  const essays = state.essays.filter((e) => e.taskType === tt);
+  const count = (x) => state.writingTasks.filter((t) => t.taskType === x).length;
+
   el.innerHTML = `
+    ${tabsBar([["TASK_1", "📊 Writing Task 1", count("TASK_1")], ["TASK_2", "📝 Writing Task 2", count("TASK_2")]], tt, "wtab")}
     <div class="card">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-        <h2 style="margin:0">Writing Tasks</h2>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+        <h2 style="margin:0">${info.icon} ${info.label}</h2>
         <span style="flex:1"></span>
-        <button class="btn small" id="btn-view-criteria">View Assessment Criteria</button>
+        ${topics.length ? topicSelect("w-topic", topics, ui.writingTopic, countBy(ofType, (t) => t.topic || "General")) : ""}
+        <button class="btn small" id="btn-view-criteria">View ${tt === "TASK_1" ? "Task 1" : "Task 2"} Criteria</button>
       </div>
-      ${state.writingTasks.length === 0 ? `<div class="empty"><span class="icon">📝</span>
-        <div class="title">No tasks yet</div>
-        <div class="hint">${isTeacher ? "Create the first task in the teacher panel — it will appear for your students." : "The teacher hasn't added tasks yet. Check back later!"}</div>
+      <p class="muted small" style="margin-bottom:10px">${info.hint}</p>
+      ${ofType.length === 0 ? `<div class="empty"><span class="icon">${info.icon}</span>
+        <div class="title">No ${info.label} tasks yet</div>
+        <div class="hint">${isTeacher ? "Create a task in the teacher panel → Writing Task Bank." : "The teacher hasn't added tasks yet. Check back later!"}</div>
         ${isTeacher ? `<button class="btn primary" data-page="cabinet">Create task → Teacher Panel</button>` : ""}</div>` : ""}
-      <table><thead><tr><th>Type</th><th>Task</th><th>Limit</th><th></th></tr></thead><tbody>
-      ${state.writingTasks.map((t) => `
-        <tr><td>${t.taskType}<br><span class="muted small">${t.moduleType}${t.promptKind ? " · " + esc(t.promptKind) : ""}</span></td>
-        <td style="max-width:420px">${esc(t.prompt.slice(0, 140))}${t.prompt.length > 140 ? "…" : ""}${t.imageUrl ? " 🖼️" : ""}</td>
-        <td>${t.minWords} words<br><span class="muted small">${t.timeLimitMin} min</span></td>
-        <td><button class="btn small primary" data-write="${t.id}">Write</button></td></tr>`).join("")}
-      </tbody></table>
+      ${groups.map(([tp, list]) => `
+        <h3 class="topic-head">${esc(tp)} <span class="muted small">${list.length}</span></h3>
+        <table><thead><tr><th>Module</th><th>Task</th><th>Limit</th><th></th></tr></thead><tbody>
+        ${list.map((t) => `
+          <tr><td>${t.moduleType}${t.promptKind ? `<br><span class="muted small">${esc(t.promptKind)}</span>` : ""}</td>
+          <td style="max-width:460px">${esc(t.prompt.slice(0, 160))}${t.prompt.length > 160 ? "…" : ""}${t.imageUrl ? " 🖼️" : ""}</td>
+          <td>${t.minWords} words<br><span class="muted small">${t.timeLimitMin} min</span></td>
+          <td><button class="btn small primary" data-write="${t.id}">Write</button></td></tr>`).join("")}
+        </tbody></table>`).join("")}
     </div>
     <div id="essay-editor"></div>
     <div class="card">
-      <h2>My Checks / Essays</h2>
-      <table><thead><tr><th>Date</th><th>Student</th><th>Type</th><th>Words</th><th>Attempt</th><th>Overall</th><th>Honesty</th><th></th></tr></thead><tbody>
-      ${state.essays.map((e) => `
-        <tr><td>${e.createdAt.slice(0, 10)}</td><td>${esc(e.studentName)}</td><td>${e.taskType}</td><td>${e.wordCount}</td>
+      <h2>${isTeacher ? "Students' essays" : "My essays"} — ${info.label}</h2>
+      <table><thead><tr><th>Date</th><th>Student</th><th>Words</th><th>Attempt</th><th>Overall</th><th>Honesty</th><th></th></tr></thead><tbody>
+      ${essays.map((e) => `
+        <tr><td>${e.createdAt.slice(0, 10)}</td><td>${esc(e.studentName)}</td><td>${e.wordCount}</td>
         <td>${e.attempt}</td><td><b>${e.checked ? fmtBand(e.overall) : "—"}</b></td>
         <td>${honestyBadge(e)}</td>
-        <td><button class="btn small" data-view-essay="${e.id}">📄 Open</button></td></tr>`).join("") || `<tr><td colspan="8"><div class="empty"><span class="icon">🗂</span><div class="title">No essays yet</div><div class="hint">Select a task above and write your first essay — AI will check it within seconds.</div></div></td></tr>`}
+        <td><button class="btn small" data-view-essay="${e.id}">📄 Open</button></td></tr>`).join("") || `<tr><td colspan="7"><div class="empty"><span class="icon">🗂</span><div class="title">No ${info.label} essays yet</div><div class="hint">Select a task above and write — AI will check it within seconds.</div></div></td></tr>`}
       </tbody></table>
     </div>`;
 
+  el.querySelectorAll("[data-wtab]").forEach((b) => b.onclick = () => {
+    ui.writingTab = b.dataset.wtab; ui.writingTopic = ""; renderWriting();
+  });
+  const ts = $("#w-topic");
+  if (ts) ts.onchange = () => { ui.writingTopic = ts.value; renderWriting(); };
   el.querySelectorAll("[data-write]").forEach((b) => b.onclick = () => openEditor(parseInt(b.dataset.write)));
   el.querySelectorAll("[data-view-essay]").forEach((b) => b.onclick = () => viewEssay(parseInt(b.dataset.viewEssay)));
   el.querySelectorAll('[data-page="cabinet"]').forEach((b) => b.onclick = () => renderPage("cabinet"));
-  const btnViewCriteria = $("#btn-view-criteria");
-  if (btnViewCriteria) {
-    btnViewCriteria.onclick = async () => {
-      try {
-        const cr = await GET("/api/writing/active-criteria");
-        showCriteriaModal(cr.title, cr.version, cr.content);
-      } catch (e) { toast(e.message, true); }
-    };
-  }
+  $("#btn-view-criteria").onclick = () => viewActiveCriteria(tt);
+}
+
+async function viewActiveCriteria(taskType) {
+  try {
+    const cr = await GET("/api/writing/active-criteria?taskType=" + encodeURIComponent(taskType));
+    showCriteriaModal(cr.title, cr.version, cr.content);
+  } catch (e) { toast(e.message, true); }
 }
 
 function honestyBadge(e) {
@@ -441,7 +599,7 @@ function openEditor(taskId) {
     <div class="card">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <button class="btn small" id="ed-back">← Back to tasks</button>
-        <h2 style="margin:0;flex:1">New Essay — ${task.taskType} (${task.moduleType})</h2>
+        <h2 style="margin:0;flex:1">New ${task.taskType === "TASK_1" ? "Writing Task 1" : "Writing Task 2 essay"} (${task.moduleType})${task.topic ? ` · ${esc(task.topic)}` : ""}</h2>
       </div>
       <div class="banner" style="background:var(--bg);margin:12px 0">${esc(task.prompt)}</div>
       ${task.imageUrl ? `<img src="${esc(task.imageUrl)}" class="task-image" alt="Task image">` : ""}
@@ -461,12 +619,7 @@ function openEditor(taskId) {
       </div>
     </div>`;
   $("#ed-back").onclick = () => { clearInterval(ed.timer); $("#essay-editor").innerHTML = ""; };
-  $("#ed-view-criteria").onclick = async () => {
-    try {
-      const cr = await GET("/api/writing/active-criteria");
-      showCriteriaModal(cr.title, cr.version, cr.content);
-    } catch (e) { toast(e.message, true); }
-  };
+  $("#ed-view-criteria").onclick = () => viewActiveCriteria(task.taskType);
 
   const ta = $("#essay-textarea");
   const updateWords = () => {
@@ -539,7 +692,7 @@ async function viewEssay(id) {
     ${data.imageUrl ? `<img src="${esc(data.imageUrl)}" class="task-image" alt="Task image">` : ""}
     ${data.report ? `
       <div class="scores">
-        ${scoreCell("TR", data.final?.taskResponse ?? data.ai?.taskResponse)}
+        ${scoreCell(data.taskType === "TASK_1" ? "TA" : "TR", data.final?.taskResponse ?? data.ai?.taskResponse)}
         ${scoreCell("CC", data.final?.coherence ?? data.ai?.coherence)}
         ${scoreCell("LR", data.final?.lexical ?? data.ai?.lexical)}
         ${scoreCell("GRA", data.final?.grammar ?? data.ai?.grammar)}
@@ -839,8 +992,10 @@ async function viewSpeakingSession(id) {
 function editTaskForm(id) {
   const t = state.writingTasks.find((x) => x.id === id);
   if (!t) return;
+  $("#cab-task-form").open = true;
   $("#cab-task-type").value = t.taskType;
   $("#cab-task-module").value = t.moduleType;
+  $("#cab-task-topic").value = t.topic && t.topic !== "General" ? t.topic : "";
   $("#cab-task-prompt").value = t.prompt;
   $("#cab-task-kind").value = t.promptKind || "";
   $("#cab-task-imgurl").value = t.imageUrl || "";
@@ -848,11 +1003,13 @@ function editTaskForm(id) {
   const addBtn = $("#cab-task-add");
   addBtn.textContent = "Update task";
   addBtn.dataset.editId = id;
+  $("#cab-task-form").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 function editTopicForm(id) {
   const t = state.speakingTopics.find((x) => x.id === id);
   if (!t) return;
+  $("#cab-sp-form").open = true;
   $("#cab-sp-title").value = t.title;
   $("#cab-sp-desc").value = t.description || "";
   $("#cab-sp-p1").value = (t.part1Questions || []).join("\n");
@@ -863,11 +1020,31 @@ function editTopicForm(id) {
   addBtn.dataset.editId = id;
 }
 
+const CR_SCOPE = { "": "Task 1 & 2", TASK_1: "Task 1", TASK_2: "Task 2" };
+
 function renderCabinet() {
   const el = $("#page-cabinet");
+  const ui = state.ui;
+  const bt = ui.bankTab;
+  const bankOfType = state.writingTasks.filter((t) => t.taskType === bt);
+  const bankTopics = topicsOf(bankOfType);
+  if (ui.bankTopic && !bankTopics.includes(ui.bankTopic)) ui.bankTopic = "";
+  const bankShown = bankOfType.filter((t) => !ui.bankTopic || (t.topic || "General") === ui.bankTopic);
+  const bankGroups = topicsOf(bankShown).map((tp) => [tp, bankShown.filter((t) => (t.topic || "General") === tp)]);
+  const allTopics = [...new Set([...IELTS_TOPICS, ...state.writingTasks.map((t) => t.topic).filter(Boolean)])];
+  const cnt = (x) => state.writingTasks.filter((t) => t.taskType === x).length;
+  const sec = (key) => `class="cab-sec ${ui.cabTab === key ? "" : "hidden"}"`;
+
   el.innerHTML = `
-    <div class="card">
-      <h2>Students</h2>
+    ${tabsBar([
+      ["students", "👥 Students", state.students.length],
+      ["tasks", "✍ Writing Task Bank", state.writingTasks.length],
+      ["criteria", "📋 Assessment Criteria", state.criteria.length],
+      ["speaking", "🎤 Speaking Topics", state.speakingTopics.length],
+    ], ui.cabTab, "cabtab")}
+
+    <div ${sec("students")}><div class="card">
+      <h2 style="margin-top:0">Students</h2>
       <div class="grid cols-2" style="margin-bottom:10px">
         <input id="cab-st-name" placeholder="Full name">
         <input id="cab-st-email" placeholder="Email">
@@ -881,19 +1058,28 @@ function renderCabinet() {
       ${state.students.map((s) => `
         <tr><td>${esc(s.fullName)}</td><td>${esc(s.email)}</td><td>${s.targetBand ? s.targetBand.toFixed(1) : "—"}</td>
         <td>${(s.groups || []).join(", ")}</td>
-        <td><button class="btn small danger" data-del-student="${s.id}">✕</button></td></tr>`).join("")
+        <td style="white-space:nowrap"><button class="btn small" data-pwd-student="${s.id}" title="Set new password">🔑</button>
+            <button class="btn small danger" data-del-student="${s.id}">✕</button></td></tr>`).join("")
         || `<tr><td colspan="5" class="muted">No students yet</td></tr>`}
       </tbody></table>
-    </div>
-    <div class="card">
-      <h2>Writing Task Bank</h2>
-      <details><summary>Create new task</summary>
-        <div class="grid cols-2" style="margin-bottom:10px;margin-top:10px">
-          <select id="cab-task-type"><option>TASK_2</option><option>TASK_1</option></select>
+    </div></div>
+
+    <div ${sec("tasks")}><div class="card">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <h2 style="margin:0">Writing Task Bank</h2>
+        <span style="flex:1"></span>
+        ${bankTopics.length ? topicSelect("cab-bank-topic", bankTopics, ui.bankTopic, countBy(bankOfType, (t) => t.topic || "General")) : ""}
+      </div>
+      ${tabsBar([["TASK_1", "📊 Task 1", cnt("TASK_1")], ["TASK_2", "📝 Task 2", cnt("TASK_2")]], bt, "banktab")}
+      <details id="cab-task-form"><summary>➕ Create new task</summary>
+        <div class="grid cols-3" style="margin-bottom:10px;margin-top:10px">
+          <select id="cab-task-type"><option value="TASK_1" ${bt === "TASK_1" ? "selected" : ""}>TASK_1</option><option value="TASK_2" ${bt === "TASK_2" ? "selected" : ""}>TASK_2</option></select>
           <select id="cab-task-module"><option>ACADEMIC</option><option>GENERAL</option></select>
+          <input id="cab-task-topic" list="cab-topic-list" placeholder="Topic (e.g. Education)">
+          <datalist id="cab-topic-list">${allTopics.map((t) => `<option value="${esc(t)}">`).join("")}</datalist>
         </div>
-        <input id="cab-task-prompt" placeholder="Task text (prompt)" style="width:100%;margin-bottom:8px">
-        <label style="font-size:12px;color:var(--muted)">Prompt kind (optional, e.g. "opinion", "discussion")</label>
+        <textarea id="cab-task-prompt" rows="3" placeholder="Task text (prompt)" style="width:100%;margin-bottom:8px"></textarea>
+        <label style="font-size:12px;color:var(--muted)">Prompt kind (optional: Task 1 — "bar chart", "map", "process", "letter"; Task 2 — "opinion", "discussion")</label>
         <input id="cab-task-kind" placeholder="Prompt kind" style="width:100%;margin-bottom:8px">
         <label style="font-size:12px;color:var(--muted)">Image (for Task 1: chart/table)</label>
         <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -902,19 +1088,29 @@ function renderCabinet() {
         </div>
         <button class="btn primary" id="cab-task-add">Add task</button>
       </details>
-      <table style="margin-top:10px"><thead><tr><th>Type</th><th>Prompt</th><th></th></tr></thead><tbody>
-      ${state.writingTasks.map((t) => `
-        <tr><td>${t.taskType} / ${t.moduleType}${t.promptKind ? " · " + esc(t.promptKind) : ""}${t.imageUrl ? " 🖼️" : ""}</td>
-        <td style="max-width:320px">${esc(t.prompt.slice(0, 100))}${t.prompt.length > 100 ? "…" : ""}</td>
-        <td><button class="btn small" data-edit-task="${t.id}">Edit</button>
-            <button class="btn small danger" data-del-task="${t.id}">✕</button></td></tr>`).join("")
-        || `<tr><td colspan="3" class="muted">No tasks yet</td></tr>`}
-      </tbody></table>
-    </div>
-    <div class="card">
-      <h2>Assessment Criteria</h2>
-      <p class="muted small">Active set is used in the AI prompt. Upload with the same title = new version.</p>
-      <input id="cab-cr-title" placeholder="Title (e.g. "IELTS Writing — Official Descriptor")" style="width:100%;margin-bottom:8px">
+      ${bankGroups.map(([tp, list]) => `
+        <h3 class="topic-head">${esc(tp)} <span class="muted small">${list.length}</span></h3>
+        <table><thead><tr><th>Module</th><th>Prompt</th><th></th></tr></thead><tbody>
+        ${list.map((t) => `
+          <tr><td>${t.moduleType}${t.promptKind ? " · " + esc(t.promptKind) : ""}${t.imageUrl ? " 🖼️" : ""}</td>
+          <td style="max-width:420px">${esc(t.prompt.slice(0, 120))}${t.prompt.length > 120 ? "…" : ""}</td>
+          <td style="white-space:nowrap"><button class="btn small" data-edit-task="${t.id}">Edit</button>
+              <button class="btn small danger" data-del-task="${t.id}">✕</button></td></tr>`).join("")}
+        </tbody></table>`).join("") || `<p class="muted" style="margin-top:10px">No ${bt === "TASK_1" ? "Task 1" : "Task 2"} tasks yet</p>`}
+    </div></div>
+
+    <div ${sec("criteria")}><div class="card">
+      <h2 style="margin-top:0">Assessment Criteria</h2>
+      <p class="muted small">One active set per task: Task 1 checks use the active Task 1 set, Task 2 — the Task 2 set
+        (if none, the "Task 1 & 2" set). Upload with the same title = new version.</p>
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <input id="cab-cr-title" placeholder="Title (e.g. IELTS Writing Task 1 — Official Descriptor)" style="flex:1;min-width:240px">
+        <select id="cab-cr-tasktype">
+          <option value="">For: Task 1 & 2</option>
+          <option value="TASK_1">For: Task 1</option>
+          <option value="TASK_2">For: Task 2</option>
+        </select>
+      </div>
       <textarea id="cab-cr-content" rows="5" style="width:100%;margin-bottom:8px" placeholder="Criteria and instructions for the AI..."></textarea>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn primary" id="cab-cr-add">Upload / update</button>
@@ -922,9 +1118,9 @@ function renderCabinet() {
         <input type="file" id="cab-cr-pdf" accept="application/pdf,.pdf" style="max-width:260px">
         <button class="btn small" id="cab-cr-pdf-upload">Import PDF</button>
       </div>
-      <table style="margin-top:12px"><thead><tr><th>Title</th><th>Version</th><th>Active</th><th></th></tr></thead><tbody>
+      <table style="margin-top:12px"><thead><tr><th>Title</th><th>For</th><th>Version</th><th>Active</th><th></th></tr></thead><tbody>
       ${state.criteria.map((c) => `
-        <tr><td>${esc(c.title)}</td><td>v${c.version}</td>
+        <tr><td>${esc(c.title)}</td><td><span class="badge">${CR_SCOPE[c.taskType || ""]}</span></td><td>v${c.version}</td>
         <td>${c.active ? "✅" : ""}</td>
         <td>
           <button class="btn small" data-view-cr="${c.id}">View</button>
@@ -932,12 +1128,13 @@ function renderCabinet() {
           ${!c.active ? `<button class="btn small" data-activate-cr="${c.id}">Activate</button>` : ""}
           <button class="btn small danger" data-del-cr="${c.id}">✕</button>
         </td></tr>`).join("")
-        || `<tr><td colspan="4" class="muted">No criteria sets yet</td></tr>`}
+        || `<tr><td colspan="5" class="muted">No criteria sets yet</td></tr>`}
       </tbody></table>
-    </div>
-    <div class="card">
-      <h2>Speaking: Topic Bank</h2>
-      <details><summary>Create / edit topic</summary>
+    </div></div>
+
+    <div ${sec("speaking")}><div class="card">
+      <h2 style="margin-top:0">Speaking: Topic Bank</h2>
+      <details id="cab-sp-form"><summary>➕ Create / edit topic</summary>
         <input id="cab-sp-title" placeholder="Topic (e.g. Environment)" style="width:100%;margin-bottom:8px;margin-top:10px">
         <textarea id="cab-sp-desc" rows="2" style="width:100%;margin-bottom:8px" placeholder="Short description"></textarea>
         <label style="font-size:12px;color:var(--muted)">Part 1 questions — one per line</label>
@@ -956,7 +1153,13 @@ function renderCabinet() {
             <button class="btn small danger" data-del-sp="${t.id}">✕</button></td></tr>`).join("")
         || `<tr><td colspan="5" class="muted">No topics yet</td></tr>`}
       </tbody></table>
-    </div>`;
+    </div></div>`;
+
+  // tabs
+  el.querySelectorAll("[data-cabtab]").forEach((b) => b.onclick = () => { ui.cabTab = b.dataset.cabtab; renderCabinet(); });
+  el.querySelectorAll("[data-banktab]").forEach((b) => b.onclick = () => { ui.bankTab = b.dataset.banktab; ui.bankTopic = ""; renderCabinet(); });
+  const bts = $("#cab-bank-topic");
+  if (bts) bts.onchange = () => { ui.bankTopic = bts.value; renderCabinet(); };
 
   $("#cab-st-add").onclick = async () => {
     const target = parseFloat($("#cab-st-target").value);
@@ -970,6 +1173,15 @@ function renderCabinet() {
       renderCabinet();
     } catch (e) { toast(e.message, true); }
   };
+  el.querySelectorAll("[data-pwd-student]").forEach((b) => b.onclick = async () => {
+    const st = state.students.find((s) => s.id == b.dataset.pwdStudent);
+    const pwd = window.prompt(`New password for ${st ? st.fullName : "student"} (min. 6 characters):`);
+    if (pwd == null) return;
+    try {
+      await PUT(`/api/admin/students/${b.dataset.pwdStudent}/password`, { password: pwd });
+      toast("Student password changed");
+    } catch (e) { toast(e.message, true); }
+  });
   el.querySelectorAll("[data-del-student]").forEach((b) => b.onclick = async () => {
     if (!confirm("Delete student and all their data?")) return;
     try {
@@ -992,6 +1204,7 @@ function renderCabinet() {
     const editId = $("#cab-task-add").dataset.editId;
     const payload = {
       taskType: $("#cab-task-type").value, moduleType: $("#cab-task-module").value,
+      topic: $("#cab-task-topic").value.trim() || null,
       prompt: $("#cab-task-prompt").value,
       promptKind: $("#cab-task-kind").value || null,
       imageUrl: imageUrl,
@@ -1000,12 +1213,11 @@ function renderCabinet() {
       if (editId) {
         await PUT("/api/writing/tasks/" + editId, payload);
         toast("Task updated");
-        delete $("#cab-task-add").dataset.editId;
-        $("#cab-task-add").textContent = "Add task";
       } else {
         await POST("/api/writing/tasks", payload);
         toast("Task added");
       }
+      ui.bankTab = payload.taskType;
       state.writingTasks = await GET("/api/writing/tasks");
       renderCabinet();
     } catch (e) { toast(e.message, true); }
@@ -1019,6 +1231,7 @@ function renderCabinet() {
     try {
       await POST("/api/writing/criteria", {
         title: $("#cab-cr-title").value, content: $("#cab-cr-content").value,
+        taskType: $("#cab-cr-tasktype").value || null,
       });
       toast("Criteria saved");
       state.criteria = await GET("/api/writing/criteria");
@@ -1032,10 +1245,13 @@ function renderCabinet() {
     fd.append("file", fileInput.files[0]);
     const t = $("#cab-cr-title").value.trim();
     if (t) fd.append("title", t);
+    const tt = $("#cab-cr-tasktype").value;
+    if (tt) fd.append("taskType", tt);
     try {
       const res = await fetch("/api/writing/criteria/upload", {
         method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd,
       });
+      if (res.status === 401) { logout(); throw new Error("Session expired"); }
       if (!res.ok) {
         let msg = "PDF import failed (" + res.status + ")";
         try { msg = (await res.json()).message || msg; } catch (_) {}
@@ -1056,9 +1272,9 @@ function renderCabinet() {
   el.querySelectorAll("[data-del-cr]").forEach((b) => b.onclick = async () => {
     if (!confirm("Delete this criteria set?")) return;
     try {
-      await DEL("/api/writing/criteria/" + b.dataset.delCr);
+      const r = await DEL("/api/writing/criteria/" + b.dataset.delCr);
       state.criteria = await GET("/api/writing/criteria");
-      toast("Deleted");
+      toast(r && r.archived ? `Removed (archived: used in ${r.usedInChecks} essay check(s))` : "Deleted");
       renderCabinet();
     } catch (e) { toast(e.message, true); }
   });
@@ -1071,6 +1287,7 @@ function renderCabinet() {
     const cr = state.criteria.find((c) => c.id == b.dataset.loadCr);
     if (!cr) return;
     $("#cab-cr-title").value = cr.title;
+    $("#cab-cr-tasktype").value = cr.taskType || "";
     $("#cab-cr-content").value = cr.content || "";
     toast("Loaded into editor — edit and upload to version");
   });
@@ -1089,8 +1306,6 @@ function renderCabinet() {
       if (editId) {
         await PUT("/api/speaking/topics/" + editId, payload);
         toast("Topic updated");
-        delete $("#cab-sp-add").dataset.editId;
-        $("#cab-sp-add").textContent = "Add topic";
       } else {
         await POST("/api/speaking/topics", payload);
         toast("Topic added");
@@ -1148,5 +1363,6 @@ $("#register-form").onsubmit = async (ev) => {
 
 document.querySelectorAll(".nav-btn").forEach((b) => b.onclick = () => renderPage(b.dataset.page));
 $("#logout-btn").onclick = logout;
+$("#pwd-btn").onclick = openPasswordModal;
 
 boot();

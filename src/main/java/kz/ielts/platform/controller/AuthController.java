@@ -45,9 +45,7 @@ public class AuthController {
         User user = new User(req.email(), encoder.encode(req.password()),
                 req.fullName(), User.Role.STUDENT);
         users.save(user);
-        log.info("REGISTER OK: email={}, hashLen={}, hashPrefix={}",
-                req.email(), user.getPasswordHash().length(),
-                user.getPasswordHash().substring(0, Math.min(10, user.getPasswordHash().length())));
+        log.info("REGISTER OK: email={}", req.email());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(Map.of("token", jwt.issue(user.getId(), user.getEmail(), "STUDENT"),
                         "role", "STUDENT", "fullName", user.getFullName()));
@@ -60,8 +58,6 @@ public class AuthController {
         String email = req.email() == null ? "" : req.email();
         String password = req.password() == null ? "" : req.password();
 
-        log.info("LOGIN ATTEMPT: email='{}', password-length={}", email, password.length());
-
         User user = users.findByEmail(email)
                 .orElseThrow(() -> {
                     log.warn("LOGIN FAIL: user NOT FOUND for email='{}'", email);
@@ -69,14 +65,9 @@ public class AuthController {
                             "Invalid email or password");
                 });
 
-        log.info("LOGIN: user found id={}, hashLen={}, hash='{}'",
-                user.getId(), user.getPasswordHash().length(), user.getPasswordHash());
-
         boolean matches = encoder.matches(password, user.getPasswordHash());
-        log.info("LOGIN: encoder.matches() = {}, encoder class = {}",
-                matches, encoder.getClass().getSimpleName());
-
         if (!matches) {
+            log.warn("LOGIN FAIL: wrong password for email='{}'", email);
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid email or password");
         }
 

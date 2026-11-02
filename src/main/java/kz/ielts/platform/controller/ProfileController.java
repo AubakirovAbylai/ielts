@@ -4,21 +4,46 @@ import kz.ielts.platform.entity.User;
 import kz.ielts.platform.repository.UserRepository;
 import kz.ielts.platform.security.JwtAuthFilter.CurrentUser;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
 
-/** Профиль: установка целевого балла, смена имени. */
+/** Профиль: установка целевого балла, смена имени, смена пароля. */
 @RestController
 @RequestMapping("/api/profile")
 public class ProfileController {
 
     private final UserRepository users;
+    private final PasswordEncoder encoder;
 
-    public ProfileController(UserRepository users) {
+    public ProfileController(UserRepository users, PasswordEncoder encoder) {
         this.users = users;
+        this.encoder = encoder;
+    }
+
+    public record PasswordRequest(String currentPassword, String newPassword) {}
+
+    /** Смена своего пароля: нужен текущий пароль, новый — минимум 6 символов. */
+    @PostMapping("/password")
+    public Map<String, Object> changePassword(@RequestBody PasswordRequest req, CurrentUser me) {
+        User u = users.findById(me.id())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+        if (req.currentPassword() == null || !encoder.matches(req.currentPassword(), u.getPasswordHash())) {
+            // 400, а не 401: фронт на 401 разлогинивает пользователя
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Current password is incorrect");
+        }
+        if (req.newPassword() == null || req.newPassword().length() < 6) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "New password must be at least 6 characters");
+        }
+        if (req.newPassword().equals(req.currentPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "New password must differ from the current one");
+        }
+        u.setPasswordHash(encoder.encode(req.newPassword()));
+        users.save(u);
+        return Map.of("ok", true);
     }
 
     public record UpdateRequest(String fullName, Double targetBand) {}

@@ -44,12 +44,12 @@ public class WritingController {
     // ---------- Банк заданий ----------
 
     public record TaskRequest(String taskType, String moduleType, String promptKind,
-                              String prompt, String imageUrl) {}
+                              String prompt, String imageUrl, String topic) {}
 
     /** Плоский DTO задания: без entity User-владельца. */
     public record TaskDto(Long id, String taskType, String moduleType, String promptKind,
                           String prompt, String imageUrl, int minWords, int timeLimitMin,
-                          String createdAt) {}
+                          String createdAt, String topic) {}
 
     private static TaskDto toDto(WritingTask t) {
         return new TaskDto(t.getId(),
@@ -58,16 +58,34 @@ public class WritingController {
                 t.getPromptKind(), t.getPrompt(),
                 t.getImageUrl() == null ? "" : t.getImageUrl(),
                 t.getMinWords(), t.getTimeLimitMin(),
-                t.getCreatedAt() == null ? null : t.getCreatedAt().toString());
+                t.getCreatedAt() == null ? null : t.getCreatedAt().toString(),
+                t.getTopic() == null || t.getTopic().isBlank() ? "General" : t.getTopic());
     }
 
-    /** Плоский DTO набора критериев. */
+    /** Плоский DTO набора критериев. taskType: TASK_1 / TASK_2 / null (оба задания). */
     public record CriteriaDto(Long id, String title, int version, String content,
-                              boolean active, String createdAt) {}
+                              boolean active, String createdAt, String taskType) {}
 
     private static CriteriaDto toDto(CriteriaSet c) {
         return new CriteriaDto(c.getId(), c.getTitle(), c.getVersion(), c.getContent(),
-                c.isActive(), c.getCreatedAt() == null ? null : c.getCreatedAt().toString());
+                c.isActive(), c.getCreatedAt() == null ? null : c.getCreatedAt().toString(),
+                c.getTaskType());
+    }
+
+    /** "TASK_1" / "TASK_2" / null (= для обоих заданий). Всё прочее — 400. */
+    private static String normTaskType(String raw) {
+        if (raw == null || raw.isBlank() || raw.equalsIgnoreCase("ANY") || raw.equalsIgnoreCase("BOTH")) {
+            return null;
+        }
+        String v = raw.trim().toUpperCase();
+        if (!v.equals("TASK_1") && !v.equals("TASK_2")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "taskType must be TASK_1, TASK_2 or empty");
+        }
+        return v;
+    }
+
+    private static boolean sameScope(CriteriaSet c, String taskType) {
+        return java.util.Objects.equals(c.getTaskType(), taskType);
     }
 
     @GetMapping("/tasks")
@@ -115,6 +133,7 @@ public class WritingController {
         task.setPrompt(req.prompt().trim());
         task.setPromptKind(req.promptKind());
         task.setImageUrl(req.imageUrl() == null || req.imageUrl().isBlank() ? null : req.imageUrl().trim());
+        task.setTopic(req.topic() == null || req.topic().isBlank() ? null : req.topic().trim());
         return task;
     }
 
@@ -130,13 +149,13 @@ public class WritingController {
 
     // ---------- Критерии ----------
 
-    public record CriteriaRequest(String title, String content, Boolean newVersion) {}
+    public record CriteriaRequest(String title, String content, Boolean newVersion, String taskType) {}
 
     @GetMapping("/criteria")
     public List<CriteriaDto> listCriteria(CurrentUser me) {
         requireTeacher(me);
         return criteria.findByOwnerIdOrderByCreatedAtDesc(me.id())
-                .stream().map(WritingController::toDto).toList();
+                .stream().filter(c -> !c.isArchived()).map(WritingController::toDto).toList();
     }
 
     /** Создать набор критериев; если набор с таким title существует — новая версия. */
@@ -147,7 +166,7 @@ public class WritingController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Criteria content is empty");
         }
         User owner = users.findById(me.id()).orElseThrow(this::notFound);
-        return toDto(saveNewVersion(owner, req.title(), req.content().trim()));
+        return toDto(saveNewVersion(owner, req.title(), req.content().trim(), normTaskType(req.taskType())));
     }
 
     /**
@@ -158,6 +177,7 @@ public class WritingController {
     @PostMapping("/criteria/upload")
     public CriteriaDto uploadCriteriaPdf(@RequestParam("file") MultipartFile file,
                                          @RequestParam(value = "title", required = false) String title,
+                                         @RequestParam(value = "taskType", required = false) String taskType,
                                          CurrentUser me) {
         requireTeacher(me);
         if (file == null || file.isEmpty()) {
@@ -177,21 +197,23 @@ public class WritingController {
         String effectiveTitle = (title == null || title.isBlank())
                 ? stripExtension(file.getOriginalFilename()) : title.trim();
         User owner = users.findById(me.id()).orElseThrow(this::notFound);
-        return toDto(saveNewVersion(owner, effectiveTitle, text.trim()));
+        return toDto(saveNewVersion(owner, effectiveTitle, text.trim(), normTaskType(taskType)));
     }
 
-    private CriteriaSet saveNewVersion(User owner, String title, String content) {
+    private CriteriaSet saveNewVersion(User owner, String title, String content, String taskType) {
         List<CriteriaSet> all = criteria.findByOwnerIdOrderByCreatedAtDesc(owner.getId());
         String effectiveTitle = (title == null || title.isBlank()) ? "Criteria" : title.trim();
         int nextVersion = all.stream()
                 .filter(c -> c.getTitle().equals(effectiveTitle))
                 .mapToInt(CriteriaSet::getVersion).max().orElse(0) + 1;
-        // Активен может быть только один набор критериев у преподавателя:
-        // деактивируем все прежние, новый становится единственным активным.
-        all.forEach(c -> { c.setActive(false); criteria.save(c); });
+        // Один активный набор на задание: новый набор для Task 1 деактивирует
+        // только прежние наборы Task 1 (Task 2 — аналогично; общий — только общие).
+        all.stream().filter(c -> sameScope(c, taskType) && c.isActive())
+                .forEach(c -> { c.setActive(false); criteria.save(c); });
 
         CriteriaSet set = new CriteriaSet(owner, effectiveTitle, content);
         set.setVersion(nextVersion);
+        set.setTaskType(taskType);
         return criteria.save(set);
     }
 
@@ -208,8 +230,10 @@ public class WritingController {
         if (!set.getOwner().getId().equals(me.id())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
-        // Активация исключающая: деактивируем все наборы, выбранный — единственный активный.
-        criteria.findByOwnerIdOrderByCreatedAtDesc(me.id()).forEach(c -> {
+        // Активация исключающая в пределах задания (Task 1 / Task 2 / общий).
+        criteria.findByOwnerIdOrderByCreatedAtDesc(me.id()).stream()
+                .filter(c -> sameScope(c, set.getTaskType()))
+                .forEach(c -> {
             boolean activate = c.getId().equals(id);
             if (c.isActive() != activate) {
                 c.setActive(activate);
@@ -218,9 +242,13 @@ public class WritingController {
         });
     }
 
-    /** Удалить набор критериев. Набор, на который ссылаются проверки эссе, защищён (FK). */
+    /**
+     * Удалить набор критериев. Если по нему уже проверялись эссе (FK из essay_check),
+     * физически не удаляем — архивируем: набор пропадает из списка и перестаёт быть
+     * активным, а старые проверки сохраняют ссылку на свою версию критериев.
+     */
     @DeleteMapping("/criteria/{id}")
-    public void deleteCriteria(@PathVariable Long id, CurrentUser me) {
+    public java.util.Map<String, Object> deleteCriteria(@PathVariable Long id, CurrentUser me) {
         requireTeacher(me);
         CriteriaSet set = criteria.findById(id).orElseThrow(this::notFound);
         if (!set.getOwner().getId().equals(me.id())) {
@@ -228,15 +256,18 @@ public class WritingController {
         }
         List<EssayCheck> refs = checks.findByCriteriaSetId(id);
         if (!refs.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Cannot delete: this criteria set was used in "
-                            + refs.size() + " essay check(s)");
+            set.setActive(false);
+            set.setArchived(true);
+            criteria.save(set);
+            return java.util.Map.of("deleted", true, "archived", true, "usedInChecks", refs.size());
         }
         criteria.delete(set);
+        return java.util.Map.of("deleted", true, "archived", false, "usedInChecks", 0);
     }
 
     @GetMapping("/active-criteria")
-    public CriteriaDto getActiveCriteria(CurrentUser me) {
+    public CriteriaDto getActiveCriteria(@RequestParam(value = "taskType", required = false) String taskType,
+                                         CurrentUser me) {
         Long teacherId;
         if (me.isTeacher()) {
             teacherId = me.id();
@@ -247,7 +278,10 @@ public class WritingController {
             }
             teacherId = user.getTeacher().getId();
         }
-        CriteriaSet set = criteria.findFirstByOwnerIdAndActiveTrueOrderByIdDesc(teacherId)
+        String tt = normTaskType(taskType);
+        CriteriaSet set = (tt == null
+                ? criteria.findFirstByOwnerIdAndActiveTrueOrderByIdDesc(teacherId)
+                : criteria.findActiveFor(teacherId, tt))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No active criteria set found"));
         return toDto(set);
     }

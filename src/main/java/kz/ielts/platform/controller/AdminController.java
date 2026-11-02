@@ -87,6 +87,24 @@ public class AdminController {
         users.delete(student);
     }
 
+    /** Учитель задаёт новый пароль своему ученику (если ученик его забыл). */
+    @PutMapping("/students/{id}/password")
+    public Map<String, Object> resetStudentPassword(@PathVariable Long id,
+                                                    @RequestBody Map<String, String> req, CurrentUser me) {
+        User student = users.findById(id).orElseThrow(this::notFound);
+        if (student.getTeacher() == null || !student.getTeacher().getId().equals(me.id())
+                || student.getRole() != User.Role.STUDENT) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        }
+        String pwd = req.get("password");
+        if (pwd == null || pwd.length() < 6) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must be at least 6 characters");
+        }
+        student.setPasswordHash(encoder.encode(pwd));
+        users.save(student);
+        return Map.of("ok", true);
+    }
+
     // ---------- Группы ----------
 
     @PostMapping("/groups")

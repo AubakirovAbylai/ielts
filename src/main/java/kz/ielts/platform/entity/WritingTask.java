@@ -40,6 +40,10 @@ public class WritingTask {
     @Column(nullable = false, length = 4000)
     private String prompt;      // условие задания
 
+    /** Тема задания (Education, Environment, Technology...). Для группировки в банке заданий. */
+    @Column(length = 60)
+    private String topic;
+
     /** Минимальный лимит слов: 150 для Task 1, 250 для Task 2. */
     @Column(name = "min_words", nullable = false)
     private int minWords = 250;
@@ -79,6 +83,8 @@ public class WritingTask {
     public void setPromptKind(String promptKind) { this.promptKind = promptKind; }
     public String getPrompt() { return prompt; }
     public void setPrompt(String prompt) { this.prompt = prompt; }
+    public String getTopic() { return topic; }
+    public void setTopic(String topic) { this.topic = topic; }
     public int getMinWords() { return minWords; }
     public int getTimeLimitMin() { return timeLimitMin; }
     public String getImageUrl() { return imageUrl; }

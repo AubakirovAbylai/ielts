@@ -34,13 +34,18 @@ public class EssayCheckService {
     }
 
     public EssayCheck check(Essay essay, Long criteriaSetId) {
+        WritingTask task = essay.getTask();
+        String taskType = task.getTaskType() == null ? null : task.getTaskType().name();
         CriteriaSet set = criteriaSetId != null
                 ? criteria.findById(criteriaSetId).orElseThrow(this::notFound)
-                : criteria.findFirstByOwnerIdAndActiveTrueOrderByIdDesc(essay.getTask().getOwner().getId())
+                : criteria.findActiveFor(task.getOwner().getId(), taskType)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
                             "No active criteria set: the teacher must upload criteria first"));
 
-        String response = ai.check(systemPrompt(set), userPrompt(essay));
+        String system = task.getTaskType() == WritingTask.TaskType.TASK_1
+                ? systemPromptTask1(set, task.getModuleType())
+                : systemPromptTask2(set);
+        String response = ai.check(system, userPrompt(essay));
         JsonNode json = parseJson(response);
 
         double tr = score(json, "taskResponse");
@@ -53,33 +58,95 @@ public class EssayCheckService {
         return checks.save(check);
     }
 
-    private String systemPrompt(CriteriaSet set) {
+    /** Общая часть: формат ответа. Ключ taskResponse = TA для Task 1 / TR для Task 2. */
+    private static final String JSON_FORMAT = """
+            Respond ONLY with valid JSON, no markdown wrapper:
+            {
+              "taskResponse": <score 1.0-9.0 step 0.5>,
+              "coherence": <score>,
+              "lexical": <score>,
+              "grammar": <score>,
+              "report": "<markdown report>"
+            }
+            """;
+
+    /** Промпт для Writing Task 1: Academic (график/таблица/карта/процесс) или General (письмо). */
+    String systemPromptTask1(CriteriaSet set, WritingTask.ModuleType module) {
+        String taskSpecific = module == WritingTask.ModuleType.GENERAL
+                ? """
+                  This is IELTS General Training WRITING TASK 1 — a LETTER (minimum 150 words, 20 minutes).
+                  The first criterion is TASK ACHIEVEMENT (TA), not Task Response. For TA check:
+                  - the purpose of the letter is clear from the start;
+                  - ALL three bullet points of the task are covered and appropriately extended;
+                  - the tone/register (formal, semi-formal, informal) is consistent and suits the recipient;
+                  - appropriate opening and closing (Dear Sir/Madam ... Yours faithfully, etc.).
+                  A letter that misses a bullet point cannot get TA above 5.
+                  """
+                : """
+                  This is IELTS Academic WRITING TASK 1 — a REPORT describing visual information
+                  (graph, chart, table, map, process or diagram). Minimum 150 words, 20 minutes.
+                  The first criterion is TASK ACHIEVEMENT (TA), not Task Response. For TA check:
+                  - there is a clear OVERVIEW of the main trends/stages/differences
+                    (no overview ⇒ TA is at most 5);
+                  - key features are selected and highlighted, with accurate data and comparisons;
+                  - the student does NOT give personal opinions, reasons or speculation;
+                  - no conclusion with opinion; no mechanical listing of every number.
+                  Coherence: logical grouping of data into paragraphs, accurate linking of comparisons.
+                  Lexical resource: range of vocabulary for trends, comparisons and approximations.
+                  """;
         return """
-                You are an IELTS examiner with 15 years of experience. Assess the essay strictly
-                against the criteria and the teacher's instructions below.
+                You are an IELTS examiner with 15 years of experience. You are assessing WRITING TASK 1.
+                Use ONLY the Task 1 band descriptors. Do not assess it as an essay.
+
+                %s
+                === TEACHER'S CRITERIA AND INSTRUCTIONS ===
+                %s
+                === END OF CRITERIA ===
+
+                %s
+                The report field must contain, in English:
+                1. The estimated Band Score and the score for each criterion
+                   (label the first one "Task Achievement (TA)").
+                2. Whether there is a clear overview / whether all bullet points are covered.
+                3. Specific errors with quotes from the student's text and corrections.
+                4. Improved versions of weak sentences (e.g. better trend/comparison language).
+                5. Strengths of the work.
+                6. Three priority recommendations for the next Task 1.
+                Do not inflate scores. This is a preliminary estimate, not an official IELTS score.
+                """.formatted(taskSpecific, set.getContent(), JSON_FORMAT);
+    }
+
+    /** Промпт для Writing Task 2: эссе (opinion / discussion / problem-solution / two-part). */
+    String systemPromptTask2(CriteriaSet set) {
+        return """
+                You are an IELTS examiner with 15 years of experience. You are assessing WRITING TASK 2 —
+                an ESSAY (minimum 250 words, 40 minutes). Use ONLY the Task 2 band descriptors.
+
+                The first criterion is TASK RESPONSE (TR). For TR check:
+                - ALL parts of the question are addressed (e.g. both views + own opinion in a discussion
+                  essay; both problems and solutions; both questions in a two-part question);
+                - a clear position is presented throughout (for opinion questions);
+                - main ideas are extended and supported with relevant reasons and examples;
+                - no irrelevant or memorised off-topic content.
+                Coherence: clear paragraphing with one central idea per paragraph, logical progression,
+                cohesive devices used accurately and not mechanically.
+                Lexical resource and grammar: range, accuracy, collocations, complex structures.
 
                 === TEACHER'S CRITERIA AND INSTRUCTIONS ===
                 %s
                 === END OF CRITERIA ===
 
-                Respond ONLY with valid JSON, no markdown wrapper:
-                {
-                  "taskResponse": <score 1.0-9.0 step 0.5>,
-                  "coherence": <score>,
-                  "lexical": <score>,
-                  "grammar": <score>,
-                  "report": "<markdown report>"
-                }
-
+                %s
                 The report field must contain, in English:
-                1. The estimated Band Score and the score for each criterion.
-                2. Justification of why the essay matches this level.
+                1. The estimated Band Score and the score for each criterion
+                   (label the first one "Task Response (TR)").
+                2. Justification of why the essay matches this level; is the position clear?
                 3. Specific errors with quotes from the student's text and corrections.
                 4. Improved versions of weak sentences.
                 5. Strengths of the work.
                 6. Three priority recommendations for the next essay.
                 Do not inflate scores. This is a preliminary estimate, not an official IELTS score.
-                """.formatted(set.getContent());
+                """.formatted(set.getContent(), JSON_FORMAT);
     }
 
     private String userPrompt(Essay essay) {
@@ -87,17 +154,18 @@ public class EssayCheckService {
         String imageNote = task.getImageUrl() == null || task.getImageUrl().isBlank() ? "" : """
 
                 Note: the task includes a chart/table image (%s) which you cannot see.
-                Judge Task Response only by how well the text summarises, selects and compares
+                Judge Task Achievement only by how well the text summarises, selects and compares
                 the data as described in the prompt; do not penalise the essay for details
                 of the image you cannot verify.""".formatted(task.getImageUrl());
+        String label = task.getTaskType() == WritingTask.TaskType.TASK_1 ? "RESPONSE" : "ESSAY";
         return """
                 === TASK (%s, %s, minimum words: %d) ===
                 %s%s
-                === STUDENT'S ESSAY (%d words) ===
+                === STUDENT'S %s (%d words) ===
                 %s
                 """.formatted(task.getTaskType(), task.getModuleType(),
                 task.getMinWords(), task.getPrompt(), imageNote,
-                essay.getWordCount(), essay.getText());
+                label, essay.getWordCount(), essay.getText());
     }
 
     private JsonNode parseJson(String raw) {

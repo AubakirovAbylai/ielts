@@ -162,7 +162,7 @@ class WritingControllerTest {
 
         var request = new WritingController.TaskRequest(
                 "TASK_1", "ACADEMIC", "graph",
-                "Summarise the information.", "/uploads/chart.png");
+                "Summarise the information.", "/uploads/chart.png", "Education");
 
         mockMvc.perform(post("/api/writing/tasks")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -174,7 +174,8 @@ class WritingControllerTest {
                 .andExpect(jsonPath("$.prompt").value("Summarise the information."))
                 .andExpect(jsonPath("$.imageUrl").value("/uploads/chart.png"))
                 .andExpect(jsonPath("$.minWords").value(150))
-                .andExpect(jsonPath("$.timeLimitMin").value(20));
+                .andExpect(jsonPath("$.timeLimitMin").value(20))
+                .andExpect(jsonPath("$.topic").value("Education"));
     }
 
     // ---------- active-criteria ----------
@@ -261,7 +262,7 @@ class WritingControllerTest {
     }
 
     @Test
-    void deleteCriteria_usedByEssayCheck_409() throws Exception {
+    void deleteCriteria_usedByEssayCheck_archivesInsteadOf409() throws Exception {
         loginAsTeacher();
         when(criteriaSetRepository.findById(20L)).thenReturn(Optional.of(criteriaSet));
         when(essayCheckRepository.findByCriteriaSetId(20L))
@@ -269,9 +270,12 @@ class WritingControllerTest {
 
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                         .delete("/api/writing/criteria/20"))
-                .andExpect(status().isConflict());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.archived").value(true));
 
         verify(criteriaSetRepository, org.mockito.Mockito.never()).delete(any(CriteriaSet.class));
+        org.junit.jupiter.api.Assertions.assertTrue(criteriaSet.isArchived());
+        org.junit.jupiter.api.Assertions.assertFalse(criteriaSet.isActive());
     }
 
     @Test

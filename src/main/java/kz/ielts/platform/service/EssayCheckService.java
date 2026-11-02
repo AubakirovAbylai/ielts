@@ -36,7 +36,7 @@ public class EssayCheckService {
     public EssayCheck check(Essay essay, Long criteriaSetId) {
         CriteriaSet set = criteriaSetId != null
                 ? criteria.findById(criteriaSetId).orElseThrow(this::notFound)
-                : criteria.findFirstByOwnerIdAndActiveTrueOrderByVersionDesc(essay.getTask().getOwner().getId())
+                : criteria.findFirstByOwnerIdAndActiveTrueOrderByIdDesc(essay.getTask().getOwner().getId())
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
                             "No active criteria set: the teacher must upload criteria first"));
 

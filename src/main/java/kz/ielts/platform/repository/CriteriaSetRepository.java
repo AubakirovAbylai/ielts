@@ -8,5 +8,5 @@ import java.util.Optional;
 
 public interface CriteriaSetRepository extends JpaRepository<CriteriaSet, Long> {
     List<CriteriaSet> findByOwnerIdOrderByCreatedAtDesc(Long ownerId);
-    Optional<CriteriaSet> findFirstByOwnerIdAndActiveTrueOrderByVersionDesc(Long ownerId);
+    Optional<CriteriaSet> findFirstByOwnerIdAndActiveTrueOrderByIdDesc(Long ownerId);
 }

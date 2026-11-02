@@ -182,10 +182,9 @@ public class WritingController {
         int nextVersion = all.stream()
                 .filter(c -> c.getTitle().equals(effectiveTitle))
                 .mapToInt(CriteriaSet::getVersion).max().orElse(0) + 1;
-        // прежние версии деактивируются
-        all.stream()
-                .filter(c -> c.getTitle().equals(effectiveTitle))
-                .forEach(c -> { c.setActive(false); criteria.save(c); });
+        // Активен может быть только один набор критериев у преподавателя:
+        // деактивируем все прежние, новый становится единственным активным.
+        all.forEach(c -> { c.setActive(false); criteria.save(c); });
 
         CriteriaSet set = new CriteriaSet(owner, effectiveTitle, content);
         set.setVersion(nextVersion);
@@ -205,9 +204,14 @@ public class WritingController {
         if (!set.getOwner().getId().equals(me.id())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
-        criteria.findByOwnerIdOrderByCreatedAtDesc(me.id()).stream()
-                .filter(c -> c.getTitle().equals(set.getTitle()))
-                .forEach(c -> { c.setActive(c.getId().equals(id)); criteria.save(c); });
+        // Активация исключающая: деактивируем все наборы, выбранный — единственный активный.
+        criteria.findByOwnerIdOrderByCreatedAtDesc(me.id()).forEach(c -> {
+            boolean activate = c.getId().equals(id);
+            if (c.isActive() != activate) {
+                c.setActive(activate);
+                criteria.save(c);
+            }
+        });
     }
 
     @GetMapping("/active-criteria")
@@ -222,7 +226,7 @@ public class WritingController {
             }
             teacherId = user.getTeacher().getId();
         }
-        CriteriaSet set = criteria.findFirstByOwnerIdAndActiveTrueOrderByVersionDesc(teacherId)
+        CriteriaSet set = criteria.findFirstByOwnerIdAndActiveTrueOrderByIdDesc(teacherId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No active criteria set found"));
         return toDto(set);
     }

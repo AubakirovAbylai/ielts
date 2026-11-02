@@ -14,7 +14,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -166,11 +168,23 @@ public class SpeakingSessionController {
     @GetMapping
     public List<Map<String, Object>> list(@RequestParam(required = false) Long studentId,
                                           CurrentUser me) {
-        List<SpeakingSession> rows = me.isTeacher()
-                ? (studentId != null
-                    ? sessions.findByStudentIdOrderByCreatedAtDesc(studentId)
-                    : sessions.findByStudentTeacherId(me.id()))
-                : sessions.findByStudentIdOrderByCreatedAtDesc(me.id());
+        List<SpeakingSession> rows;
+        if (!me.isTeacher()) {
+            rows = sessions.findByStudentIdOrderByCreatedAtDesc(me.id());
+        } else if (studentId != null) {
+            rows = sessions.findByStudentIdOrderByCreatedAtDesc(studentId);
+        } else {
+            // Учитель без фильтра: сессии своих учеников + собственные
+            // (учитель сам проходит практику как «ученик»).
+            Map<Long, SpeakingSession> byId = new LinkedHashMap<>();
+            sessions.findByStudentTeacherId(me.id())
+                    .forEach(s -> byId.putIfAbsent(s.getId(), s));
+            sessions.findByStudentIdOrderByCreatedAtDesc(me.id())
+                    .forEach(s -> byId.putIfAbsent(s.getId(), s));
+            rows = byId.values().stream()
+                    .sorted(Comparator.comparing(SpeakingSession::getCreatedAt).reversed())
+                    .toList();
+        }
         return rows.stream().map(s -> {
             Map<String, Object> m = new HashMap<>();
             m.put("id", s.getId());
@@ -189,9 +203,12 @@ public class SpeakingSessionController {
     public Map<String, Object> get(@PathVariable Long id, CurrentUser me) {
         SpeakingSession s = sessions.findById(id).orElseThrow(this::notFound);
         if (me.isTeacher()) {
-            User teacher = users.findById(me.id()).orElseThrow();
-            if (s.getStudent().getTeacher() == null
-                    || !s.getStudent().getTeacher().getId().equals(teacher.getId())) {
+            // Учитель видит сессии своих учеников и свои собственные
+            // (учитель сам проходит практику как «ученик»).
+            boolean own = s.getStudent().getId().equals(me.id());
+            boolean ownStudent = s.getStudent().getTeacher() != null
+                    && s.getStudent().getTeacher().getId().equals(me.id());
+            if (!own && !ownStudent) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN);
             }
         } else if (!s.getStudent().getId().equals(me.id())) {

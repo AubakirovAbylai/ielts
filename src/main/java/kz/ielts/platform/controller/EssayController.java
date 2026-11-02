@@ -14,7 +14,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -79,15 +81,26 @@ public class EssayController {
         return out;
     }
 
-    /** История эссе: своя для ученика, всех — для учителя. */
+    /** История эссе: своя для ученика; учителю — все ученики + его собственные. */
     @GetMapping
     public List<Map<String, Object>> list(@RequestParam(required = false) Long studentId,
                                           CurrentUser me) {
-        List<Essay> rows = me.isTeacher()
-                ? (studentId != null
-                    ? essays.findByStudentIdOrderByCreatedAtDesc(studentId)
-                    : essays.findByStudentTeacherId(me.id()))
-                : essays.findByStudentIdOrderByCreatedAtDesc(me.id());
+        List<Essay> rows;
+        if (!me.isTeacher()) {
+            rows = essays.findByStudentIdOrderByCreatedAtDesc(me.id());
+        } else if (studentId != null) {
+            rows = essays.findByStudentIdOrderByCreatedAtDesc(studentId);
+        } else {
+            // Учитель сам может писать эссе: показываем и их.
+            Map<Long, Essay> byId = new LinkedHashMap<>();
+            essays.findByStudentTeacherId(me.id())
+                    .forEach(e -> byId.putIfAbsent(e.getId(), e));
+            essays.findByStudentIdOrderByCreatedAtDesc(me.id())
+                    .forEach(e -> byId.putIfAbsent(e.getId(), e));
+            rows = byId.values().stream()
+                    .sorted(Comparator.comparing(Essay::getCreatedAt).reversed())
+                    .toList();
+        }
         return rows.stream().map(this::summary).toList();
     }
 

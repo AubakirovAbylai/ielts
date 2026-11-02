@@ -12,6 +12,7 @@ import kz.ielts.platform.security.JwtService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -26,10 +27,14 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -173,7 +178,7 @@ class WritingControllerTest {
     @Test
     void activeCriteria_teacher() throws Exception {
         loginAsTeacher();
-        when(criteriaSetRepository.findFirstByOwnerIdAndActiveTrueOrderByVersionDesc(1L))
+        when(criteriaSetRepository.findFirstByOwnerIdAndActiveTrueOrderByIdDesc(1L))
                 .thenReturn(Optional.of(criteriaSet));
 
         mockMvc.perform(get("/api/writing/active-criteria"))
@@ -189,7 +194,7 @@ class WritingControllerTest {
     void activeCriteria_student() throws Exception {
         loginAsStudent();
         when(userRepository.findById(2L)).thenReturn(Optional.of(student));
-        when(criteriaSetRepository.findFirstByOwnerIdAndActiveTrueOrderByVersionDesc(1L))
+        when(criteriaSetRepository.findFirstByOwnerIdAndActiveTrueOrderByIdDesc(1L))
                 .thenReturn(Optional.of(criteriaSet));
 
         mockMvc.perform(get("/api/writing/active-criteria"))
@@ -202,11 +207,39 @@ class WritingControllerTest {
     @Test
     void activeCriteria_none_404() throws Exception {
         loginAsTeacher();
-        when(criteriaSetRepository.findFirstByOwnerIdAndActiveTrueOrderByVersionDesc(1L))
+        when(criteriaSetRepository.findFirstByOwnerIdAndActiveTrueOrderByIdDesc(1L))
                 .thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/writing/active-criteria"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("No active criteria set found"));
+    }
+
+    @Test
+    void activateCriteria_deactivatesAllOtherSets() throws Exception {
+        loginAsTeacher();
+
+        // Выбранный набор пока неактивен, конкурент — активен
+        criteriaSet.setActive(false);
+        CriteriaSet other = new CriteriaSet(teacher, "Old set", "old");
+        setEntityId(other, 21L);
+        other.setVersion(1);
+        other.setActive(true);
+
+        when(criteriaSetRepository.findById(20L)).thenReturn(Optional.of(criteriaSet));
+        when(criteriaSetRepository.findByOwnerIdOrderByCreatedAtDesc(1L))
+                .thenReturn(List.of(criteriaSet, other));
+        when(criteriaSetRepository.save(any(CriteriaSet.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        mockMvc.perform(put("/api/writing/criteria/20/activate"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<CriteriaSet> captor = ArgumentCaptor.forClass(CriteriaSet.class);
+        verify(criteriaSetRepository, times(2)).save(captor.capture());
+        List<CriteriaSet> saved = captor.getAllValues();
+        // criteriaSet (id=20) становится активным, other (id=21) — деактивируется
+        assertTrue(saved.stream().anyMatch(c -> c.getId() == 20L && c.isActive()));
+        assertTrue(saved.stream().anyMatch(c -> c.getId() == 21L && !c.isActive()));
     }
 }

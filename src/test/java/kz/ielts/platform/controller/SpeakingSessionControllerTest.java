@@ -275,6 +275,7 @@ class SpeakingSessionControllerTest {
         s.markFinished();
 
         when(sessions.findByStudentTeacherId(1L)).thenReturn(List.of(s));
+        when(sessions.findByStudentIdOrderByCreatedAtDesc(1L)).thenReturn(List.of());
 
         mockMvc.perform(get("/api/speaking/sessions"))
                 .andExpect(status().isOk())
@@ -285,6 +286,71 @@ class SpeakingSessionControllerTest {
                 .andExpect(jsonPath("$[0].status").value("FINISHED"))
                 .andExpect(jsonPath("$[0].studentName").value("Student One"))
                 .andExpect(jsonPath("$[0].answers").value(0));
+    }
+
+
+    @Test
+    void list_teacher_includesOwnSessions() throws Exception {
+        loginAsTeacher();
+        SpeakingSession own = new SpeakingSession(teacher, topic, SpeakingSession.Part.PART_1);
+        setEntityId(own, 200L);
+        own.markFinished();
+        own.applyReport("Own report", 6.0, 6.0, 6.0, 6.0);
+        SpeakingSession ofStudent = new SpeakingSession(student, topic, SpeakingSession.Part.PART_2);
+        setEntityId(ofStudent, 201L);
+
+        when(sessions.findByStudentTeacherId(1L)).thenReturn(List.of(ofStudent));
+        when(sessions.findByStudentIdOrderByCreatedAtDesc(1L)).thenReturn(List.of(own));
+
+        mockMvc.perform(get("/api/speaking/sessions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.size()").value(2))
+                .andExpect(jsonPath("$[?(@.id == 200)]").exists())
+                .andExpect(jsonPath("$[?(@.id == 201)]").exists());
+    }
+
+    @Test
+    void get_teacherViewsOwnSession_200() throws Exception {
+        loginAsTeacher();
+        SpeakingSession s = new SpeakingSession(teacher, topic, SpeakingSession.Part.PART_1);
+        setEntityId(s, 50L);
+        s.addAnswer("PART_1", "What do you study?", "I am a teacher", 30);
+        s.markFinished();
+        s.applyReport("Teacher report", 6.0, 6.5, 6.0, 6.5);
+        when(sessions.findById(50L)).thenReturn(Optional.of(s));
+
+        mockMvc.perform(get("/api/speaking/sessions/50"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(50))
+                .andExpect(jsonPath("$.status").value("REPORTED"))
+                .andExpect(jsonPath("$.qa.size()").value(1))
+                .andExpect(jsonPath("$.report").value("Teacher report"))
+                .andExpect(jsonPath("$.scores.overall").value(6.5));
+    }
+
+    @Test
+    void get_teacherViewsOwnStudentSession_200() throws Exception {
+        loginAsTeacher();
+        SpeakingSession s = new SpeakingSession(student, topic, SpeakingSession.Part.PART_1);
+        setEntityId(s, 51L);
+        when(sessions.findById(51L)).thenReturn(Optional.of(s));
+
+        mockMvc.perform(get("/api/speaking/sessions/51"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(51))
+                .andExpect(jsonPath("$.topic").value("Education"));
+    }
+
+    @Test
+    void get_teacherViewsForeignStudentSession_403() throws Exception {
+        loginAsTeacher();
+        // otherStudent не привязан к этому учителю
+        SpeakingSession s = new SpeakingSession(otherStudent, topic, SpeakingSession.Part.PART_1);
+        setEntityId(s, 52L);
+        when(sessions.findById(52L)).thenReturn(Optional.of(s));
+
+        mockMvc.perform(get("/api/speaking/sessions/52"))
+                .andExpect(status().isForbidden());
     }
 
     @Test

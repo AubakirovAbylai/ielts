@@ -930,6 +930,7 @@ function renderCabinet() {
           <button class="btn small" data-view-cr="${c.id}">View</button>
           <button class="btn small" data-load-cr="${c.id}">Load into editor</button>
           ${!c.active ? `<button class="btn small" data-activate-cr="${c.id}">Activate</button>` : ""}
+          <button class="btn small danger" data-del-cr="${c.id}">✕</button>
         </td></tr>`).join("")
         || `<tr><td colspan="4" class="muted">No criteria sets yet</td></tr>`}
       </tbody></table>
@@ -1049,6 +1050,15 @@ function renderCabinet() {
     try {
       await PUT(`/api/writing/criteria/${b.dataset.activateCr}/activate`);
       state.criteria = await GET("/api/writing/criteria");
+      renderCabinet();
+    } catch (e) { toast(e.message, true); }
+  });
+  el.querySelectorAll("[data-del-cr]").forEach((b) => b.onclick = async () => {
+    if (!confirm("Delete this criteria set?")) return;
+    try {
+      await DEL("/api/writing/criteria/" + b.dataset.delCr);
+      state.criteria = await GET("/api/writing/criteria");
+      toast("Deleted");
       renderCabinet();
     } catch (e) { toast(e.message, true); }
   });

@@ -1,22 +1,22 @@
 package kz.ielts.platform.controller;
 
+import kz.ielts.platform.entity.UploadedImage;
+import kz.ielts.platform.repository.UploadedImageRepository;
+import kz.ielts.platform.repository.UserRepository;
 import kz.ielts.platform.security.JwtAuthFilter.CurrentUser;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * Загрузка картинок для заданий Writing Task 1 (графики/таблицы/диаграммы).
- * Файлы складываются в ./data/uploads и раздаются статикой по /uploads/**.
+ * Хранятся в БД (диск Render эфемерный) и отдаются по /uploads/{id}.
  */
 @RestController
 public class FileUploadController {
@@ -24,7 +24,13 @@ public class FileUploadController {
     private static final Set<String> ALLOWED_EXT = Set.of("png", "jpg", "jpeg", "gif", "webp");
     private static final long MAX_BYTES = 5 * 1024 * 1024; // 5 МБ
 
-    private static final Path UPLOAD_DIR = Paths.get("data", "uploads");
+    private final UploadedImageRepository images;
+    private final UserRepository users;
+
+    public FileUploadController(UploadedImageRepository images, UserRepository users) {
+        this.images = images;
+        this.users = users;
+    }
 
     @PostMapping("/api/uploads")
     public Map<String, String> upload(@RequestParam("file") MultipartFile file, CurrentUser me) {
@@ -45,13 +51,37 @@ public class FileUploadController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File must be under 5 MB");
         }
         try {
-            Files.createDirectories(UPLOAD_DIR);
-            String name = UUID.randomUUID() + "." + ext;
-            file.transferTo(UPLOAD_DIR.resolve(name).toAbsolutePath());
-            return Map.of("url", "/uploads/" + name);
-        } catch (IOException e) {
+            var owner = users.findById(me.id()).orElseThrow(this::notFound);
+            UploadedImage saved = images.save(new UploadedImage(
+                    owner, original, contentTypeFor(ext), file.getBytes()));
+            return Map.of("url", "/uploads/" + saved.getId());
+        } catch (java.io.IOException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                     "Could not save the file: " + e.getMessage());
         }
+    }
+
+    /** Отдача картинки: публично (используется в <img> без токена). */
+    @GetMapping("/uploads/{id}")
+    public ResponseEntity<byte[]> serve(@PathVariable Long id) {
+        UploadedImage img = images.findById(id).orElseThrow(this::notFound);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(img.getContentType()))
+                .cacheControl(org.springframework.http.CacheControl.maxAge(
+                        java.time.Duration.ofDays(30)).cachePublic())
+                .body(img.getData());
+    }
+
+    private static String contentTypeFor(String ext) {
+        return switch (ext) {
+            case "png" -> "image/png";
+            case "gif" -> "image/gif";
+            case "webp" -> "image/webp";
+            default -> "image/jpeg"; // jpg, jpeg
+        };
+    }
+
+    private ResponseStatusException notFound() {
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
     }
 }

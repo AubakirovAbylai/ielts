@@ -1,9 +1,11 @@
 package kz.ielts.platform.controller;
 
 import kz.ielts.platform.entity.CriteriaSet;
+import kz.ielts.platform.entity.EssayCheck;
 import kz.ielts.platform.entity.User;
 import kz.ielts.platform.entity.WritingTask;
 import kz.ielts.platform.repository.CriteriaSetRepository;
+import kz.ielts.platform.repository.EssayCheckRepository;
 import kz.ielts.platform.repository.UserRepository;
 import kz.ielts.platform.repository.WritingTaskRepository;
 import kz.ielts.platform.security.JwtAuthFilter.CurrentUser;
@@ -28,12 +30,14 @@ public class WritingController {
 
     private final WritingTaskRepository tasks;
     private final CriteriaSetRepository criteria;
+    private final EssayCheckRepository checks;
     private final UserRepository users;
 
     public WritingController(WritingTaskRepository tasks, CriteriaSetRepository criteria,
-                             UserRepository users) {
+                             EssayCheckRepository checks, UserRepository users) {
         this.tasks = tasks;
         this.criteria = criteria;
+        this.checks = checks;
         this.users = users;
     }
 
@@ -212,6 +216,23 @@ public class WritingController {
                 criteria.save(c);
             }
         });
+    }
+
+    /** Удалить набор критериев. Набор, на который ссылаются проверки эссе, защищён (FK). */
+    @DeleteMapping("/criteria/{id}")
+    public void deleteCriteria(@PathVariable Long id, CurrentUser me) {
+        requireTeacher(me);
+        CriteriaSet set = criteria.findById(id).orElseThrow(this::notFound);
+        if (!set.getOwner().getId().equals(me.id())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        }
+        List<EssayCheck> refs = checks.findByCriteriaSetId(id);
+        if (!refs.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Cannot delete: this criteria set was used in "
+                            + refs.size() + " essay check(s)");
+        }
+        criteria.delete(set);
     }
 
     @GetMapping("/active-criteria")

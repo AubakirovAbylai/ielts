@@ -2,6 +2,7 @@ package kz.ielts.platform.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import kz.ielts.platform.entity.CriteriaSet;
+import kz.ielts.platform.entity.EssayCheck;
 import kz.ielts.platform.entity.User;
 import kz.ielts.platform.entity.WritingTask;
 import kz.ielts.platform.repository.CriteriaSetRepository;
@@ -56,6 +57,9 @@ class WritingControllerTest {
 
     @MockitoBean
     private CriteriaSetRepository criteriaSetRepository;
+
+    @MockitoBean
+    private kz.ielts.platform.repository.EssayCheckRepository essayCheckRepository;
 
     @MockitoBean
     private PasswordEncoder passwordEncoder;
@@ -241,5 +245,46 @@ class WritingControllerTest {
         // criteriaSet (id=20) становится активным, other (id=21) — деактивируется
         assertTrue(saved.stream().anyMatch(c -> c.getId() == 20L && c.isActive()));
         assertTrue(saved.stream().anyMatch(c -> c.getId() == 21L && !c.isActive()));
+    }
+
+    @Test
+    void deleteCriteria_success() throws Exception {
+        loginAsTeacher();
+        when(criteriaSetRepository.findById(20L)).thenReturn(Optional.of(criteriaSet));
+        when(essayCheckRepository.findByCriteriaSetId(20L)).thenReturn(List.of());
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/api/writing/criteria/20"))
+                .andExpect(status().isOk());
+
+        verify(criteriaSetRepository).delete(criteriaSet);
+    }
+
+    @Test
+    void deleteCriteria_usedByEssayCheck_409() throws Exception {
+        loginAsTeacher();
+        when(criteriaSetRepository.findById(20L)).thenReturn(Optional.of(criteriaSet));
+        when(essayCheckRepository.findByCriteriaSetId(20L))
+                .thenReturn(List.of(new EssayCheck()));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/api/writing/criteria/20"))
+                .andExpect(status().isConflict());
+
+        verify(criteriaSetRepository, org.mockito.Mockito.never()).delete(any(CriteriaSet.class));
+    }
+
+    @Test
+    void deleteCriteria_student_403() throws Exception {
+        org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                .user("student@example.com");
+        SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        new kz.ielts.platform.security.JwtAuthFilter.CurrentUser(2L, "student@example.com", "STUDENT"),
+                        null, List.of()));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/api/writing/criteria/20"))
+                .andExpect(status().isForbidden());
     }
 }

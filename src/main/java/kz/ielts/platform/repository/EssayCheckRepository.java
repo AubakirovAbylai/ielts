@@ -8,5 +8,6 @@ import java.util.Optional;
 
 public interface EssayCheckRepository extends JpaRepository<EssayCheck, Long> {
     Optional<EssayCheck> findByEssayId(Long essayId);
+    List<EssayCheck> findByCriteriaSetId(Long criteriaSetId);
     List<EssayCheck> findByEssayStudentTeacherId(Long teacherId);
 }

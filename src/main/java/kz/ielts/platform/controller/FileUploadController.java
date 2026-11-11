@@ -21,8 +21,9 @@ import java.util.Set;
 @RestController
 public class FileUploadController {
 
-    private static final Set<String> ALLOWED_EXT = Set.of("png", "jpg", "jpeg", "gif", "webp");
-    private static final long MAX_BYTES = 5 * 1024 * 1024; // 5 МБ
+    // jfif/jpe — тот же JPEG: Windows часто сохраняет картинки из браузера как .jfif
+    private static final Set<String> ALLOWED_EXT = Set.of("png", "jpg", "jpeg", "jfif", "jpe", "gif", "webp");
+    private static final long MAX_BYTES = 10 * 1024 * 1024; // 10 МБ (фото с телефона бывают > 5 МБ)
 
     private final UploadedImageRepository images;
     private final UserRepository users;
@@ -43,12 +44,13 @@ public class FileUploadController {
         String original = file.getOriginalFilename() == null ? "" : file.getOriginalFilename();
         int dot = original.lastIndexOf('.');
         String ext = dot < 0 ? "" : original.substring(dot + 1).toLowerCase();
+        if (!ALLOWED_EXT.contains(ext)) ext = extFromContentType(file.getContentType());
         if (!ALLOWED_EXT.contains(ext)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Only PNG, JPG, GIF or WebP images are allowed");
         }
         if (file.getSize() > MAX_BYTES) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File must be under 5 MB");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File must be under 10 MB");
         }
         try {
             var owner = users.findById(me.id()).orElseThrow(this::notFound);
@@ -77,7 +79,19 @@ public class FileUploadController {
             case "png" -> "image/png";
             case "gif" -> "image/gif";
             case "webp" -> "image/webp";
-            default -> "image/jpeg"; // jpg, jpeg
+            default -> "image/jpeg"; // jpg, jpeg, jfif, jpe
+        };
+    }
+
+    /** Файл без расширения или с непривычным — смотрим на тип, присланный браузером. */
+    private static String extFromContentType(String contentType) {
+        if (contentType == null) return "";
+        return switch (contentType.toLowerCase()) {
+            case "image/png" -> "png";
+            case "image/jpeg", "image/jpg", "image/pjpeg" -> "jpg";
+            case "image/gif" -> "gif";
+            case "image/webp" -> "webp";
+            default -> "";
         };
     }
 

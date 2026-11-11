@@ -119,10 +119,31 @@ const TASK_INFO = {
   TASK_2: { label: "Writing Task 2", icon: "📝", hint: "Essay (opinion / discussion / problem-solution) · min 250 words · 40 min · Task Response" },
 };
 
-/** Unique topics of tasks, sorted; "General" last. */
-function topicsOf(tasks) {
-  const set = [...new Set(tasks.map((t) => t.topic || "General"))];
-  return set.sort((a, b) => (a === "General") - (b === "General") || a.localeCompare(b));
+// Speaking is hidden for now (code kept — flip to true to bring it back).
+const FEATURES = { speaking: false };
+
+// Suggestions for the "Prompt kind" field: Task 1 is filtered by kind, so consistent names matter.
+const PROMPT_KINDS = {
+  TASK_1: ["Bar chart", "Line graph", "Pie chart", "Table", "Mixed charts", "Map", "Process", "Letter"],
+  TASK_2: ["Opinion", "Discussion", "Problem-solution", "Advantages-disadvantages", "Two-part question"],
+};
+
+/** "bar chart " → "Bar chart" (so "Table" and "table" fall into one group). */
+function kindOf(t) {
+  const k = (t.promptKind || "").trim();
+  return k ? k[0].toUpperCase() + k.slice(1).toLowerCase() : "Other";
+}
+
+/** Task 1 is grouped/filtered by prompt kind (table, process…), Task 2 — by topic. */
+function groupKeyFn(taskType) {
+  return taskType === "TASK_1" ? kindOf : (t) => t.topic || "General";
+}
+
+/** Unique group keys of tasks, sorted; "General"/"Other" last. */
+function topicsOf(tasks, keyFn = (t) => t.topic || "General") {
+  const isLast = (k) => k === "General" || k === "Other";
+  const set = [...new Set(tasks.map(keyFn))];
+  return set.sort((a, b) => isLast(a) - isLast(b) || a.localeCompare(b));
 }
 
 /** Tab bar. items: [[key, label, count?]]. Buttons get data-<attr>="key". */
@@ -133,9 +154,9 @@ function tabsBar(items, active, attr) {
 }
 
 /** Topic dropdown with "All topics" option. */
-function topicSelect(id, topics, current, counts) {
+function topicSelect(id, topics, current, counts, allLabel = "All topics") {
   return `<select id="${id}" class="topic-select">
-    <option value="">All topics${counts ? ` (${Object.values(counts).reduce((a, b) => a + b, 0)})` : ""}</option>
+    <option value="">${allLabel}${counts ? ` (${Object.values(counts).reduce((a, b) => a + b, 0)})` : ""}</option>
     ${topics.map((t) => `<option value="${esc(t)}" ${t === current ? "selected" : ""}>${esc(t)}${counts ? ` (${counts[t] || 0})` : ""}</option>`).join("")}
   </select>`;
 }
@@ -216,6 +237,7 @@ function showApp() {
   $("#app").classList.remove("hidden");
   $("#nav-user").textContent = state.fullName || state.profile?.email || "";
   $("#nav-cabinet").classList.toggle("hidden", state.role !== "TEACHER");
+  $("#nav-speaking").classList.toggle("hidden", !FEATURES.speaking);
 }
 
 async function loadAll() {
@@ -285,15 +307,18 @@ function renderDashboard() {
   const el = $("#page-dashboard");
   const s = skillStats();
   const isTeacher = state.role === "TEACHER";
+  // Students see only their Writing cards (Listening/Reading live in MOCK Test); Speaking is behind a flag.
+  const skillCards = [
+    isTeacher && skillCard("listening", "🎧", "Listening", s.listening, "tests", "Add result", "tracker"),
+    isTeacher && skillCard("reading", "📖", "Reading", s.reading, "tests", "Add result", "tracker"),
+    skillCard("task1", "📊", "Writing Task 1", s.task1, "essays", "Practice", "writing", 'data-wtab="TASK_1"'),
+    skillCard("task2", "📝", "Writing Task 2", s.task2, "essays", "Practice", "writing", 'data-wtab="TASK_2"'),
+    FEATURES.speaking && skillCard("speaking", "🎤", "Speaking", s.speaking, "sessions", "Practice", "speaking"),
+  ].filter(Boolean);
   const cards = `
     <h2 style="margin-top:0">${isTeacher ? "Skills overview (your students)" : "My skills"}</h2>
-    <div class="grid cols-5 skill-grid">
-      ${skillCard("listening", "🎧", "Listening", s.listening, "tests", "Add result", "tracker")}
-      ${skillCard("reading", "📖", "Reading", s.reading, "tests", "Add result", "tracker")}
-      ${skillCard("task1", "📊", "Writing Task 1", s.task1, "essays", "Practice", "writing", 'data-wtab="TASK_1"')}
-      ${skillCard("task2", "📝", "Writing Task 2", s.task2, "essays", "Practice", "writing", 'data-wtab="TASK_2"')}
-      ${skillCard("speaking", "🎤", "Speaking", s.speaking, "sessions", "Practice", "speaking")}
-    </div>`;
+    <div class="grid cols-${skillCards.length} skill-grid">${skillCards.join("")}</div>
+    ${isTeacher ? "" : `<div class="card"><h2>Writing Progress</h2>${writingChart(state.essays)}</div>`}`;
 
   let body;
   if (!p || p.count === 0) {
@@ -352,6 +377,46 @@ function overallChart(series, target) {
       svg += `<text x="${x(i)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="var(--muted)">${s.date.slice(5)}</text>`;
   });
   return svg + "</svg>";
+}
+
+/** Essay scores over time: one line per Writing task (attempts included), x = essays in date order. */
+function writingChart(essays) {
+  const pts = essays.filter((e) => e.checked && e.overall != null)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  if (!pts.length) return `<div class="empty"><span class="icon">📈</span><div class="title">No checked essays yet</div>
+    <div class="hint">Write a Task 1 or Task 2 essay — your scores will be plotted here.</div></div>`;
+  const lines = [["TASK_1", "Task 1", "#6366f1"], ["TASK_2", "Task 2", "#ec4899"]];
+  const W = 900, H = 260, pad = { l: 34, r: 24, t: 14, b: 26 };
+  const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+  const lo = Math.min(4, Math.floor(Math.min(...pts.map((e) => e.overall))));
+  const y = (v) => pad.t + ih - ((v - lo) / (9 - lo)) * ih;
+  const x = (i) => pad.l + (pts.length === 1 ? iw / 2 : (i / (pts.length - 1)) * iw);
+  let svg = `<svg class="chart-svg" viewBox="0 0 ${W} ${H}">`;
+  for (let v = lo; v <= 9; v += 0.5) {
+    svg += `<line x1="${pad.l}" y1="${y(v)}" x2="${W - pad.r}" y2="${y(v)}"
+      stroke="var(--border)" stroke-width="${v % 1 === 0 ? 1 : 0.5}"/>
+      ${v % 1 === 0 ? `<text x="${pad.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${v}</text>` : ""}`;
+  }
+  const legend = [];
+  lines.forEach(([tt, label, color]) => {
+    const mine = pts.map((e, i) => [e, i]).filter(([e]) => e.taskType === tt);
+    if (!mine.length) return;
+    const path = mine.map(([e, i], k) => (k ? "L" : "M") + x(i).toFixed(1) + "," + y(e.overall).toFixed(1)).join(" ");
+    svg += `<path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round"/>`;
+    mine.forEach(([e, i]) => {
+      svg += `<circle cx="${x(i)}" cy="${y(e.overall)}" r="4.5" fill="${color}" stroke="#fff" stroke-width="1.5">
+        <title>${label} · ${e.createdAt.slice(0, 10)}: ${fmtBand(e.overall)}</title></circle>`;
+    });
+    const last = mine[mine.length - 1][0].overall;
+    legend.push(`<span style="display:inline-flex;align-items:center;gap:6px;margin-right:16px">
+      <span style="width:10px;height:10px;border-radius:50%;background:${color}"></span>
+      ${label} <span class="muted small">latest ${fmtBand(last)} · ${mine.length} ${mine.length === 1 ? "essay" : "essays"}</span></span>`);
+  });
+  pts.forEach((e, i) => {
+    if (pts.length <= 10 || i % Math.ceil(pts.length / 10) === 0)
+      svg += `<text x="${x(i)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="var(--muted)">${e.createdAt.slice(5, 10)}</text>`;
+  });
+  return `<div style="margin-bottom:6px">${legend.join("")}</div>` + svg + "</svg>";
 }
 
 function skillBars(r) {
@@ -516,11 +581,14 @@ function renderWriting() {
   const tt = ui.writingTab;
   const info = TASK_INFO[tt];
   const ofType = state.writingTasks.filter((t) => t.taskType === tt);
-  const topics = topicsOf(ofType);
+  const keyOf = groupKeyFn(tt);
+  const topics = topicsOf(ofType, keyOf);
   if (ui.writingTopic && !topics.includes(ui.writingTopic)) ui.writingTopic = "";
-  const shown = ofType.filter((t) => !ui.writingTopic || (t.topic || "General") === ui.writingTopic);
-  const groups = topicsOf(shown).map((tp) => [tp, shown.filter((t) => (t.topic || "General") === tp)]);
+  const shown = ofType.filter((t) => !ui.writingTopic || keyOf(t) === ui.writingTopic);
+  const groups = topicsOf(shown, keyOf).map((tp) => [tp, shown.filter((t) => keyOf(t) === tp)]);
   const essays = state.essays.filter((e) => e.taskType === tt);
+  // Student: tasks they have already submitted an essay for get a check mark
+  const doneIds = new Set(isTeacher ? [] : state.essays.map((e) => e.taskId));
   const count = (x) => state.writingTasks.filter((t) => t.taskType === x).length;
 
   el.innerHTML = `
@@ -529,7 +597,7 @@ function renderWriting() {
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">
         <h2 style="margin:0">${info.icon} ${info.label}</h2>
         <span style="flex:1"></span>
-        ${topics.length ? topicSelect("w-topic", topics, ui.writingTopic, countBy(ofType, (t) => t.topic || "General")) : ""}
+        ${topics.length ? topicSelect("w-topic", topics, ui.writingTopic, countBy(ofType, keyOf), tt === "TASK_1" ? "All kinds" : "All topics") : ""}
         <button class="btn small" id="btn-view-criteria">View ${tt === "TASK_1" ? "Task 1" : "Task 2"} Criteria</button>
       </div>
       <p class="muted small" style="margin-bottom:10px">${info.hint}</p>
@@ -544,7 +612,10 @@ function renderWriting() {
           <tr><td>${t.moduleType}${t.promptKind ? `<br><span class="muted small">${esc(t.promptKind)}</span>` : ""}</td>
           <td style="max-width:460px">${esc(t.prompt.slice(0, 160))}${t.prompt.length > 160 ? "…" : ""}${t.imageUrl ? " 🖼️" : ""}</td>
           <td>${t.minWords} words<br><span class="muted small">${t.timeLimitMin} min</span></td>
-          <td><button class="btn small primary" data-write="${t.id}">Write</button></td></tr>`).join("")}
+          <td style="white-space:nowrap">${isTeacher ? "" : doneIds.has(t.id)
+              ? `<span class="done-mark" title="You have already written this task">✔</span>`
+              : `<span class="done-mark" style="visibility:hidden">✔</span>`}
+            <button class="btn small primary" data-write="${t.id}">Write</button></td></tr>`).join("")}
         </tbody></table>`).join("")}
     </div>
     <div id="essay-editor"></div>
@@ -689,6 +760,7 @@ async function viewEssay(id) {
   el.innerHTML = `
     <h2>Essay #${data.id} — ${data.taskType}, attempt ${data.attempt}</h2>
     <p class="muted small">${esc(data.studentName)} · ${data.wordCount} words · ${honestyBadge(data)}</p>
+    ${data.prompt ? `<h3>Task</h3><div class="banner" style="background:var(--bg);margin:8px 0 12px">${esc(data.prompt)}</div>` : ""}
     ${data.imageUrl ? `<img src="${esc(data.imageUrl)}" class="task-image" alt="Task image">` : ""}
     ${data.report ? `
       <div class="scores">
@@ -1027,12 +1099,16 @@ function renderCabinet() {
   const ui = state.ui;
   const bt = ui.bankTab;
   const bankOfType = state.writingTasks.filter((t) => t.taskType === bt);
-  const bankTopics = topicsOf(bankOfType);
+  const bankKey = groupKeyFn(bt);
+  const bankTopics = topicsOf(bankOfType, bankKey);
   if (ui.bankTopic && !bankTopics.includes(ui.bankTopic)) ui.bankTopic = "";
-  const bankShown = bankOfType.filter((t) => !ui.bankTopic || (t.topic || "General") === ui.bankTopic);
-  const bankGroups = topicsOf(bankShown).map((tp) => [tp, bankShown.filter((t) => (t.topic || "General") === tp)]);
+  const bankShown = bankOfType.filter((t) => !ui.bankTopic || bankKey(t) === ui.bankTopic);
+  const bankGroups = topicsOf(bankShown, bankKey).map((tp) => [tp, bankShown.filter((t) => bankKey(t) === tp)]);
   const allTopics = [...new Set([...IELTS_TOPICS, ...state.writingTasks.map((t) => t.topic).filter(Boolean)])];
+  const allKinds = [...new Set([...PROMPT_KINDS.TASK_1, ...PROMPT_KINDS.TASK_2,
+    ...state.writingTasks.filter((t) => t.promptKind).map(kindOf)])];
   const cnt = (x) => state.writingTasks.filter((t) => t.taskType === x).length;
+  if (!FEATURES.speaking && ui.cabTab === "speaking") ui.cabTab = "students";
   const sec = (key) => `class="cab-sec ${ui.cabTab === key ? "" : "hidden"}"`;
 
   el.innerHTML = `
@@ -1040,7 +1116,7 @@ function renderCabinet() {
       ["students", "👥 Students", state.students.length],
       ["tasks", "✍ Writing Task Bank", state.writingTasks.length],
       ["criteria", "📋 Assessment Criteria", state.criteria.length],
-      ["speaking", "🎤 Speaking Topics", state.speakingTopics.length],
+      ...(FEATURES.speaking ? [["speaking", "🎤 Speaking Topics", state.speakingTopics.length]] : []),
     ], ui.cabTab, "cabtab")}
 
     <div ${sec("students")}><div class="card">
@@ -1068,7 +1144,7 @@ function renderCabinet() {
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <h2 style="margin:0">Writing Task Bank</h2>
         <span style="flex:1"></span>
-        ${bankTopics.length ? topicSelect("cab-bank-topic", bankTopics, ui.bankTopic, countBy(bankOfType, (t) => t.topic || "General")) : ""}
+        ${bankTopics.length ? topicSelect("cab-bank-topic", bankTopics, ui.bankTopic, countBy(bankOfType, bankKey), bt === "TASK_1" ? "All kinds" : "All topics") : ""}
       </div>
       ${tabsBar([["TASK_1", "📊 Task 1", cnt("TASK_1")], ["TASK_2", "📝 Task 2", cnt("TASK_2")]], bt, "banktab")}
       <details id="cab-task-form"><summary>➕ Create new task</summary>
@@ -1080,10 +1156,11 @@ function renderCabinet() {
         </div>
         <textarea id="cab-task-prompt" rows="3" placeholder="Task text (prompt)" style="width:100%;margin-bottom:8px"></textarea>
         <label style="font-size:12px;color:var(--muted)">Prompt kind (optional: Task 1 — "bar chart", "map", "process", "letter"; Task 2 — "opinion", "discussion")</label>
-        <input id="cab-task-kind" placeholder="Prompt kind" style="width:100%;margin-bottom:8px">
-        <label style="font-size:12px;color:var(--muted)">Image (for Task 1: chart/table)</label>
+        <input id="cab-task-kind" list="cab-kind-list" placeholder="Prompt kind" style="width:100%;margin-bottom:8px">
+        <datalist id="cab-kind-list">${allKinds.map((k) => `<option value="${esc(k)}">`).join("")}</datalist>
+        <label style="font-size:12px;color:var(--muted)">Image (for Task 1: chart/table) — PNG, JPG/JPEG, GIF or WebP, up to 10 MB</label>
         <div style="display:flex;gap:8px;margin-bottom:8px">
-          <input type="file" id="cab-task-img" accept="image/png,image/jpeg,image/gif,image/webp" style="flex:1">
+          <input type="file" id="cab-task-img" accept="image/png,image/jpeg,.jpg,.jpeg,.jfif,image/gif,image/webp" style="flex:1">
           <input id="cab-task-imgurl" placeholder="or image URL" style="flex:1">
         </div>
         <button class="btn primary" id="cab-task-add">Add task</button>
@@ -1197,7 +1274,10 @@ function renderCabinet() {
       const fd = new FormData();
       fd.append("file", fileInput.files[0]);
       try {
-        const up = await (await fetch("/api/uploads", { method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd })).json();
+        const res = await fetch("/api/uploads", { method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd });
+        const up = await res.json().catch(() => ({}));
+        // Without this check a rejected upload silently saved the task with no image
+        if (!res.ok || !up.url) throw new Error(up.message || "HTTP " + res.status);
         imageUrl = up.url;
       } catch (e) { return toast("Image upload failed: " + e.message, true); }
     }

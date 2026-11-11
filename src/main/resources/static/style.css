@@ -172,6 +172,7 @@ tr:hover td { background: var(--accent-soft); }
 .essay-stats span { font-size: 13px; }
 .word-ok { color: var(--success); font-weight: 600; }
 .word-low { color: var(--warning); font-weight: 600; }
+.done-mark { color: #16a34a; font-size: 20px; font-weight: 700; margin-right: 6px; vertical-align: middle; }
 .timer { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 16px; }
 .timer.expired { color: var(--error); }
 

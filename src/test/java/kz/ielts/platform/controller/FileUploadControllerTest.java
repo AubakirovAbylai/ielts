@@ -126,8 +126,22 @@ public class FileUploadControllerTest {
     @Test
     void upload_tooLarge() throws Exception {
         authenticateAsTeacher();
-        mockMvc.perform(multipart("/api/uploads").file(png(new byte[5 * 1024 * 1024 + 1])))
+        mockMvc.perform(multipart("/api/uploads").file(png(new byte[10 * 1024 * 1024 + 1])))
                 .andExpect(status().isBadRequest());
         verify(images, never()).save(any());
+    }
+
+    @Test
+    void upload_jpegVariants_savedAsJpeg() throws Exception {
+        authenticateAsTeacher();
+        when(images.save(any(UploadedImage.class))).thenAnswer(inv -> inv.getArgument(0));
+        for (String name : List.of("chart.jpg", "chart.JPEG", "chart.jfif", "chart")) {
+            mockMvc.perform(multipart("/api/uploads").file(
+                            new MockMultipartFile("file", name, "image/jpeg", new byte[]{1, 2})))
+                    .andExpect(status().isOk());
+        }
+        ArgumentCaptor<UploadedImage> captor = ArgumentCaptor.forClass(UploadedImage.class);
+        verify(images, org.mockito.Mockito.times(4)).save(captor.capture());
+        captor.getAllValues().forEach(img -> assertEquals("image/jpeg", img.getContentType()));
     }
 }
